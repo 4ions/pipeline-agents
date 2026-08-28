@@ -83,7 +83,7 @@ if (fileURLToPath(import.meta.url) === path.resolve(process.argv[1] ?? '')) {
   const { manifestChanged, coplayServerPath, mcpJsonPath } = await setupUnityMcp(resolvedTarget)
 
   if (manifestChanged) {
-    console.log(`Added com.coplaydev.unity-mcp and com.funplayai.unity-mcp to ${resolvedTarget}/Packages/manifest.json`)
+    console.log(`Added com.coplaydev.unity-mcp and com.gamebooom.unity.mcp to ${resolvedTarget}/Packages/manifest.json`)
   } else {
     console.log('Packages/manifest.json already has both dependencies — left unchanged.')
   }

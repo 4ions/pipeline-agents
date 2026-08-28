@@ -15,7 +15,7 @@ test('setupUnityMcp writes both manifest deps and .mcp.json when nothing exists 
 
   const manifest = JSON.parse(await readFile(path.join(dir, 'Packages', 'manifest.json'), 'utf8'))
   assert.ok(manifest.dependencies['com.coplaydev.unity-mcp'])
-  assert.ok(manifest.dependencies['com.funplayai.unity-mcp'])
+  assert.ok(manifest.dependencies['com.gamebooom.unity.mcp'])
 
   const mcpJson = JSON.parse(await readFile(path.join(dir, '.mcp.json'), 'utf8'))
   assert.ok(mcpJson.mcpServers['funplay-unity'].url.startsWith('http://127.0.0.1:'))
