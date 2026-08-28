@@ -100,10 +100,15 @@ never a 3D game. State this 2D framing explicitly in "identity" so every
 later agent (which only sees this vision, not the original game idea
 text) knows it's building 2D.
 
-Write the game's vision: its identity (what kind of game, its core hook),
-its scope (what's in and explicitly out for this build — keep it small
-enough to actually finish), and priorities (ordered list of what matters
-most if trade-offs come up later).
+Write the game's vision as exactly three fields — ALL THREE are required
+in your final structured response, do not omit any of them:
+1. identity — what kind of game this is and its core hook (2-4 sentences)
+2. scope — what's in and explicitly out for this build (keep it small
+   enough to actually finish)
+3. priorities — an ordered array of strings: what matters most if
+   trade-offs come up later (e.g. ["core loop working", "no crashes",
+   "visual polish"]). This is a REQUIRED array field, not optional —
+   your structured response is invalid without it.
 
 Also write this vision to ${targetProjectPath}/.pipeline/vision.md as
 readable Markdown (using your Write tool). Append one line to
@@ -113,7 +118,8 @@ another when you finish — one JSON object per line, shape:
 Also append one line to ${targetProjectPath}/.pipeline/progress-log.md
 when you finish, e.g. "- Vision written: <one-line summary>".
 
-Return the vision as structured data matching the required schema.`
+Return the vision as structured data with all three fields: identity,
+scope, and priorities.`
 }
 
 function escalationPrompt(vision, blockedTasks, targetProjectPath) {
