@@ -5,10 +5,11 @@ import { fileURLToPath } from 'node:url'
 import { parseActivityLog, reduceToState } from '../lib/activityLog.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const PUBLIC_DIR = path.join(__dirname, 'public')
+const DEFAULT_PUBLIC_DIR = path.join(__dirname, 'public')
 const CONTENT_TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' }
 
-export function createServer(pipelineParentDir) {
+export function createServer(pipelineParentDir, publicDir = DEFAULT_PUBLIC_DIR) {
+  const PUBLIC_DIR = publicDir
   return http.createServer(async (req, res) => {
     if (req.url === '/api/state') {
       let events = []
@@ -26,7 +27,7 @@ export function createServer(pipelineParentDir) {
 
     const reqPath = req.url === '/' ? '/index.html' : req.url
     const filePath = path.join(PUBLIC_DIR, reqPath)
-    if (!filePath.startsWith(PUBLIC_DIR)) {
+    if (!filePath.startsWith(PUBLIC_DIR + path.sep)) {
       res.writeHead(403)
       res.end('Forbidden')
       return
