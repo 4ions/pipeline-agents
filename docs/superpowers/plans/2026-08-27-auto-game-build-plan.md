@@ -218,8 +218,7 @@ git commit -m "Add state schema validators for backlog tasks and bugs"
 - Test: `auto-game-build/bin/init-pipeline.test.js`
 
 **Interfaces:**
-- Consumes: `TASK_STATUSES`, `BUG_STATUSES` from `../lib/stateSchemas.js` (Task 1).
-- Produces: `scaffoldPipeline(targetDir) -> Promise<{created: string[]}>` — called by the CLI entrypoint; also directly importable for tests. Creates `<targetDir>/.pipeline/{vision.md,gdd.md,backlog.json,bugs.json,activity.log.jsonl,progress-log.md}` if they don't already exist (never overwrites existing state, so re-running on a project mid-pipeline is safe).
+- Produces: `scaffoldPipeline(targetDir) -> Promise<{created: string[]}>` — called by the CLI entrypoint; also directly importable for tests. Creates `<targetDir>/.pipeline/{vision.md,gdd.md,backlog.json,bugs.json,activity.log.jsonl,progress-log.md}` if they don't already exist (never overwrites existing state, so re-running on a project mid-pipeline is safe). This CLI does NOT import from `../lib/stateSchemas.js` — it writes literal initial file contents (`[]`, empty string, etc.), not validated objects; the status/bug validators exist only for Task 6's schema drift-check test (see Task 1's Interfaces note).
 
 - [ ] **Step 1: Write the failing test**
 
