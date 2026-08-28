@@ -4,7 +4,7 @@ body { margin: 2rem; background: #14161c; color: #eee; }
 #office {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 3px;
+  gap: 0;
   background: #0a0b0e;
   border: 3px solid #0a0b0e;
   border-radius: 10px;
@@ -18,15 +18,20 @@ body { margin: 2rem; background: #14161c; color: #eee; }
   flex-direction: column;
   overflow: hidden;
   transition: box-shadow 0.3s ease;
+  /* Wall color on top, then the SAME floor color every room shares
+     (#d8cdb8) starting at the same %, so the floor reads as one
+     continuous surface across all six rooms instead of six separate
+     boxes — only the "wall" strip differs per role. */
+  background: linear-gradient(to bottom, var(--wall) 0%, var(--wall) 52%, #d8cdb8 52%, #d8cdb8 100%);
 }
 
-/* distinct wall color per room, like separate office rooms */
-.room-director   { background: #3a4a7a; }
-.room-designer   { background: #7a4a7a; }
-.room-programmer { background: #2f5f5f; }
-.room-artist     { background: #8a5a2f; }
-.room-tester     { background: #5a6b2f; }
-.room-fixer      { background: #6b3a3a; }
+/* distinct wall color per room, like separate zones of one shared office */
+.room-director   { --wall: #3a4a7a; }
+.room-designer   { --wall: #7a4a7a; }
+.room-programmer { --wall: #2f5f5f; }
+.room-artist     { --wall: #8a5a2f; }
+.room-tester     { --wall: #5a6b2f; }
+.room-fixer      { --wall: #6b3a3a; }
 
 .deco {
   position: absolute;
@@ -40,12 +45,12 @@ body { margin: 2rem; background: #14161c; color: #eee; }
 .floor {
   margin-top: auto;
   height: 48%;
-  background: #d8cdb8;
+  /* transparent — the .room gradient already paints the shared floor
+     color underneath; this is just for laying out the avatar+nametag */
   display: flex;
   align-items: flex-end;
   justify-content: center;
   padding-bottom: 0.6rem;
-  box-shadow: 0 -3px 0 rgba(0, 0, 0, 0.25) inset;
 }
 
 .avatar-wrap {
