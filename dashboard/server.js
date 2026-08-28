@@ -35,7 +35,10 @@ export function createServer(pipelineParentDir, publicDir = DEFAULT_PUBLIC_DIR) 
     try {
       const contents = await readFile(filePath)
       const ext = path.extname(filePath)
-      res.writeHead(200, { 'Content-Type': CONTENT_TYPES[ext] ?? 'application/octet-stream' })
+      // No caching — this dashboard is actively edited while running, and
+      // a stale cached CSS/JS file makes live edits look like they never
+      // took effect.
+      res.writeHead(200, { 'Content-Type': CONTENT_TYPES[ext] ?? 'application/octet-stream', 'Cache-Control': 'no-store' })
       res.end(contents)
     } catch {
       res.writeHead(404)
