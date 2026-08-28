@@ -22,6 +22,14 @@ implement it. Every task MUST have:
   increases by at least 1 unit within 1 second of the jump input", not
   "jumping feels good")
 - needsArt: true if the task needs a placeholder visual asset
+- needsAnimation: true if this task's GameObject moves or reacts to
+  something (the player, an enemy, a door, anything that transitions
+  between visual states) — HARD RULE: any such object needs at least an
+  idle state and one action state animated (e.g. idle+walk, closed+open,
+  idle+attack), even as simple placeholder frames. A static, never-moving
+  object (a background wall, a HUD icon that never changes) does not need
+  this. When needsAnimation is true, also set needsArt to true — animated
+  objects always need art.
 - description: MUST explicitly name the target Unity scene this task
   works in (not just the first task's description) — e.g. "In the
   LockAndKeyDemo scene, add a player GameObject with...". Programmer,

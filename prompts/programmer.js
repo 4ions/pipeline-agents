@@ -17,6 +17,7 @@ working on a Unity project at ${targetProjectPath}.
 Task: ${task.description}
 Success criterion (what the Tester will check): ${task.successCriterion}
 ${retryContext}
+${task.needsAnimation ? '\nThis task\'s GameObject already has an Animator Controller with at least an idle state and one action state, created and reviewed earlier — do not recreate it. Drive its bool/trigger parameter(s) from your gameplay code at the right moment (e.g. when the door unlocks, when the player moves).' : ''}
 
 CRITICAL — verify the scene before touching anything: Unity MCP
 scene-editing commands operate on whichever scene is currently open/active
@@ -63,4 +64,39 @@ from shell 'date -u +%Y-%m-%dT%H:%M:%SZ'>", "role": "${role}",
 "start" line (same role) before you begin.
 
 Report back a short summary of what you implemented.`
+}
+
+export function animationReviewPrompt(task, targetProjectPath) {
+  return `You are the Programmer reviewing the Artist's animation work for
+a Unity project at ${targetProjectPath}, before any gameplay code drives
+it.
+
+Task: ${task.description}
+Required: at least an idle state and one action state matching the task,
+on the correct GameObject, with sprite frames that aren't obviously
+broken (missing, blank, or wrongly scaled), and a bool/trigger parameter
+a reasonable implementation could drive to transition between them.
+
+You are auditing, not reimplementing — do NOT write or wire any gameplay
+code in this step, that happens in a later step. Only judge whether the
+animation setup itself is usable.
+
+Use the funplay-unity MCP tools to inspect what the Artist created:
+get_hierarchy, get_component_properties (on the Animator component),
+get_animator_state, and capture_game_view or a scene capture to visually
+confirm the sprites look reasonable (not blank/broken/misplaced). This
+pipeline is 2D-only — if you see 3D geometry or a Perspective camera
+anywhere near this GameObject, reject with that feedback too, since it's
+the same class of bug as a missing animation state.
+
+If the setup is usable, return accepted: true with a short note on what
+exists (states, parameter name(s)). If it is NOT usable (missing a
+required state, wrong GameObject, broken sprites, wrong renderer type,
+no usable parameter to drive), return accepted: false with concrete,
+specific feedback — name the exact problem (e.g. "Animator only has an
+Idle state, missing the Open state" or "sprite frames are assigned but
+render as solid magenta — texture import failed"), not a vague "needs
+improvement".
+
+Return your verdict as structured data.`
 }

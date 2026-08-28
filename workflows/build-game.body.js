@@ -23,14 +23,43 @@ export const meta = {
 // with this number.
 const MAX_FIX_ATTEMPTS = 4
 
+// Bounded rounds for the Artist<->Programmer animation review loop —
+// separate from MAX_FIX_ATTEMPTS since this is a distinct handoff (art
+// review, not a Tester-driven functional fix).
+const MAX_ANIMATION_ROUNDS = 3
+
+async function animateTask(task, targetProjectPath) {
+  let feedback = null
+  for (let round = 1; round <= MAX_ANIMATION_ROUNDS; round++) {
+    await agent(animatedArtPrompt(task, feedback, targetProjectPath), {
+      phase: 'Implementation',
+      label: `art-anim:${task.id}:${round}`,
+    })
+    const review = await agent(animationReviewPrompt(task, targetProjectPath), {
+      phase: 'Implementation',
+      label: `review-anim:${task.id}:${round}`,
+      schema: ANIMATION_REVIEW_SCHEMA,
+    })
+    if (review && review.accepted) {
+      return { accepted: true, rounds: round, feedback: review.feedback }
+    }
+    feedback = review
+      ? review.feedback
+      : 'No review returned — the reviewing agent failed. Try again with a simpler, more conservative animation setup (fewer states, simpler placeholder frames).'
+  }
+  return { accepted: false, rounds: MAX_ANIMATION_ROUNDS, feedback }
+}
+
 async function implementAndTestTask(task, targetProjectPath) {
+  const animationResult = task.needsAnimation ? await animateTask(task, targetProjectPath) : null
+
   let lastResult = null
   for (let attempt = 1; attempt <= MAX_FIX_ATTEMPTS; attempt++) {
     await agent(implementPrompt(task, attempt, lastResult, targetProjectPath), {
       phase: 'Implementation',
       label: `impl:${task.id}:${attempt}`,
     })
-    if (task.needsArt) {
+    if (task.needsArt && !task.needsAnimation) {
       await agent(artPrompt(task, targetProjectPath), { phase: 'Implementation', label: `art:${task.id}:${attempt}` })
     }
     lastResult = await agent(scenarioTestPrompt(task, attempt, targetProjectPath), {
@@ -39,10 +68,10 @@ async function implementAndTestTask(task, targetProjectPath) {
       schema: TEST_RESULT_SCHEMA,
     })
     if (lastResult && lastResult.passed) {
-      return { task, status: 'done', attempts: attempt, lastResult }
+      return { task, status: 'done', attempts: attempt, lastResult, animationResult }
     }
   }
-  return { task, status: 'blocked', attempts: MAX_FIX_ATTEMPTS, lastResult }
+  return { task, status: 'blocked', attempts: MAX_FIX_ATTEMPTS, lastResult, animationResult }
 }
 
 phase('Vision')

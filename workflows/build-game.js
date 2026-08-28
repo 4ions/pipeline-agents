@@ -27,13 +27,14 @@ const VISION_SCHEMA = {
 
 const BACKLOG_TASK_SCHEMA = {
   type: 'object',
-  required: ['id', 'specialization', 'description', 'successCriterion', 'needsArt', 'status', 'attempts'],
+  required: ['id', 'specialization', 'description', 'successCriterion', 'needsArt', 'needsAnimation', 'status', 'attempts'],
   properties: {
     id: { type: 'string' },
     specialization: { type: 'string', enum: ['gameplay', 'ui', 'ai', 'network', 'graphics', 'tools'] },
     description: { type: 'string' },
     successCriterion: { type: 'string', description: 'A concrete, checkable condition the Tester can verify via input+state' },
     needsArt: { type: 'boolean' },
+    needsAnimation: { type: 'boolean', description: 'true if this task\'s GameObject moves or reacts to something and needs at least an idle state plus one action state' },
     status: { type: 'string', enum: ['todo', 'in_progress', 'done', 'blocked'] },
     attempts: { type: 'number' },
   },
@@ -61,6 +62,18 @@ const TEST_RESULT_SCHEMA = {
         description: { type: 'string' },
         reproSteps: { type: 'array', items: { type: 'string' } },
       },
+    },
+  },
+}
+
+const ANIMATION_REVIEW_SCHEMA = {
+  type: 'object',
+  required: ['accepted', 'feedback'],
+  properties: {
+    accepted: { type: 'boolean' },
+    feedback: {
+      type: 'string',
+      description: 'If accepted, a short note confirming what exists. If not accepted, concrete, specific feedback the Artist can act on — name the exact problem.',
     },
   },
 }
@@ -179,6 +192,14 @@ implement it. Every task MUST have:
   increases by at least 1 unit within 1 second of the jump input", not
   "jumping feels good")
 - needsArt: true if the task needs a placeholder visual asset
+- needsAnimation: true if this task's GameObject moves or reacts to
+  something (the player, an enemy, a door, anything that transitions
+  between visual states) — HARD RULE: any such object needs at least an
+  idle state and one action state animated (e.g. idle+walk, closed+open,
+  idle+attack), even as simple placeholder frames. A static, never-moving
+  object (a background wall, a HUD icon that never changes) does not need
+  this. When needsAnimation is true, also set needsArt to true — animated
+  objects always need art.
 - description: MUST explicitly name the target Unity scene this task
   works in (not just the first task's description) — e.g. "In the
   LockAndKeyDemo scene, add a player GameObject with...". Programmer,
@@ -223,6 +244,7 @@ working on a Unity project at ${targetProjectPath}.
 Task: ${task.description}
 Success criterion (what the Tester will check): ${task.successCriterion}
 ${retryContext}
+${task.needsAnimation ? '\nThis task\'s GameObject already has an Animator Controller with at least an idle state and one action state, created and reviewed earlier — do not recreate it. Drive its bool/trigger parameter(s) from your gameplay code at the right moment (e.g. when the door unlocks, when the player moves).' : ''}
 
 CRITICAL — verify the scene before touching anything: Unity MCP
 scene-editing commands operate on whichever scene is currently open/active
@@ -271,6 +293,41 @@ from shell 'date -u +%Y-%m-%dT%H:%M:%SZ'>", "role": "${role}",
 Report back a short summary of what you implemented.`
 }
 
+function animationReviewPrompt(task, targetProjectPath) {
+  return `You are the Programmer reviewing the Artist's animation work for
+a Unity project at ${targetProjectPath}, before any gameplay code drives
+it.
+
+Task: ${task.description}
+Required: at least an idle state and one action state matching the task,
+on the correct GameObject, with sprite frames that aren't obviously
+broken (missing, blank, or wrongly scaled), and a bool/trigger parameter
+a reasonable implementation could drive to transition between them.
+
+You are auditing, not reimplementing — do NOT write or wire any gameplay
+code in this step, that happens in a later step. Only judge whether the
+animation setup itself is usable.
+
+Use the funplay-unity MCP tools to inspect what the Artist created:
+get_hierarchy, get_component_properties (on the Animator component),
+get_animator_state, and capture_game_view or a scene capture to visually
+confirm the sprites look reasonable (not blank/broken/misplaced). This
+pipeline is 2D-only — if you see 3D geometry or a Perspective camera
+anywhere near this GameObject, reject with that feedback too, since it's
+the same class of bug as a missing animation state.
+
+If the setup is usable, return accepted: true with a short note on what
+exists (states, parameter name(s)). If it is NOT usable (missing a
+required state, wrong GameObject, broken sprites, wrong renderer type,
+no usable parameter to drive), return accepted: false with concrete,
+specific feedback — name the exact problem (e.g. "Animator only has an
+Idle state, missing the Open state" or "sprite frames are assigned but
+render as solid magenta — texture import failed"), not a vague "needs
+improvement".
+
+Return your verdict as structured data.`
+}
+
 function artPrompt(task, targetProjectPath) {
   return `You are the Artist for a Unity project at ${targetProjectPath}.
 
@@ -313,6 +370,60 @@ timestamp from shell 'date -u +%Y-%m-%dT%H:%M:%SZ'>", "role": "artist",
 "event": "start"|"done", "detail": "<short note>"}.
 
 Report back a short summary of what you created and wired up.`
+}
+
+function animatedArtPrompt(task, priorFeedback, targetProjectPath) {
+  const feedbackBlock = priorFeedback
+    ? `\n\nA previous attempt was rejected by the Programmer with this
+feedback: """${priorFeedback}""" Address this feedback specifically —
+don't just repeat the same setup.`
+    : ''
+
+  return `You are the Artist for a Unity project at ${targetProjectPath}.
+
+Task: ${task.description}
+This task's GameObject moves or reacts to something, so it needs at
+least two animated states: an idle state and one action state matching
+what the task describes (e.g. idle+walk, closed+open, idle+attack) —
+simple placeholder frames are fine, visual polish is not the goal.
+${feedbackBlock}
+
+CRITICAL — this pipeline builds 2D games EXCLUSIVELY, no exceptions: use
+SpriteRenderer + sprite-based frames for every state, never a 3D
+MeshRenderer/primitive. Create or generate the placeholder sprite frames
+for each state, create an Animator Controller with at least those two
+states (plus a bool or trigger parameter a reasonable implementation
+would drive to transition between them), create the AnimationClips for
+each state, and assign the Animator Controller to the target
+GameObject's Animator component.
+
+You are NOT responsible for writing the gameplay code that drives the
+Animator's parameter from game logic — that's the Programmer's job in a
+later step. Your job ends at: the states, clips, and controller exist and
+are correctly assigned, ready for the Programmer to wire up.
+
+Use the funplay-unity MCP tools: create_animator_controller,
+create_animation_clip, assign_animator, add_component (for
+Animator/SpriteRenderer), set_component_property. Also search for
+Unity's built-in AI asset-generation tool
+(Unity_AssetGeneration_GenerateAsset, command "GenerateSprite") if you
+need to generate new sprite frames rather than reuse simple placeholder
+shapes.
+
+CRITICAL — verify the scene before touching anything: confirm which
+scene is currently open, and if this task's description names a specific
+scene, open that exact scene first if it isn't already active. If the
+task doesn't name a scene, check ${targetProjectPath}/.pipeline/gdd.md
+for the scene this build is working in.
+
+Append a "start" line and, when done, a "done" line to
+${targetProjectPath}/.pipeline/activity.log.jsonl: {"ts": "<ISO
+timestamp from shell 'date -u +%Y-%m-%dT%H:%M:%SZ'>", "role": "artist",
+"specialization": "${task.specialization}", "taskId": "${task.id}",
+"event": "start"|"done", "detail": "<short note>"}.
+
+Report back a short summary of the states/clips you created and where
+you assigned them.`
 }
 
 function scenarioTestPrompt(task, attempt, targetProjectPath) {
@@ -414,14 +525,43 @@ any issues found (empty if none).`
 // with this number.
 const MAX_FIX_ATTEMPTS = 4
 
+// Bounded rounds for the Artist<->Programmer animation review loop —
+// separate from MAX_FIX_ATTEMPTS since this is a distinct handoff (art
+// review, not a Tester-driven functional fix).
+const MAX_ANIMATION_ROUNDS = 3
+
+async function animateTask(task, targetProjectPath) {
+  let feedback = null
+  for (let round = 1; round <= MAX_ANIMATION_ROUNDS; round++) {
+    await agent(animatedArtPrompt(task, feedback, targetProjectPath), {
+      phase: 'Implementation',
+      label: `art-anim:${task.id}:${round}`,
+    })
+    const review = await agent(animationReviewPrompt(task, targetProjectPath), {
+      phase: 'Implementation',
+      label: `review-anim:${task.id}:${round}`,
+      schema: ANIMATION_REVIEW_SCHEMA,
+    })
+    if (review && review.accepted) {
+      return { accepted: true, rounds: round, feedback: review.feedback }
+    }
+    feedback = review
+      ? review.feedback
+      : 'No review returned — the reviewing agent failed. Try again with a simpler, more conservative animation setup (fewer states, simpler placeholder frames).'
+  }
+  return { accepted: false, rounds: MAX_ANIMATION_ROUNDS, feedback }
+}
+
 async function implementAndTestTask(task, targetProjectPath) {
+  const animationResult = task.needsAnimation ? await animateTask(task, targetProjectPath) : null
+
   let lastResult = null
   for (let attempt = 1; attempt <= MAX_FIX_ATTEMPTS; attempt++) {
     await agent(implementPrompt(task, attempt, lastResult, targetProjectPath), {
       phase: 'Implementation',
       label: `impl:${task.id}:${attempt}`,
     })
-    if (task.needsArt) {
+    if (task.needsArt && !task.needsAnimation) {
       await agent(artPrompt(task, targetProjectPath), { phase: 'Implementation', label: `art:${task.id}:${attempt}` })
     }
     lastResult = await agent(scenarioTestPrompt(task, attempt, targetProjectPath), {
@@ -430,10 +570,10 @@ async function implementAndTestTask(task, targetProjectPath) {
       schema: TEST_RESULT_SCHEMA,
     })
     if (lastResult && lastResult.passed) {
-      return { task, status: 'done', attempts: attempt, lastResult }
+      return { task, status: 'done', attempts: attempt, lastResult, animationResult }
     }
   }
-  return { task, status: 'blocked', attempts: MAX_FIX_ATTEMPTS, lastResult }
+  return { task, status: 'blocked', attempts: MAX_FIX_ATTEMPTS, lastResult, animationResult }
 }
 
 phase('Vision')

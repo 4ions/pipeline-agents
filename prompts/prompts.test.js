@@ -3,12 +3,13 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { visionPrompt, escalationPrompt, finalReviewPrompt } from './director.js'
 import { designPrompt } from './designer.js'
-import { implementPrompt } from './programmer.js'
-import { artPrompt } from './artist.js'
+import { implementPrompt, animationReviewPrompt } from './programmer.js'
+import { artPrompt, animatedArtPrompt } from './artist.js'
 import { scenarioTestPrompt, fullPlaytestPrompt } from './tester.js'
 
 const FIXTURE_VISION = { identity: 'A test game', scope: 'test scope', priorities: ['fun', 'polish'] }
-const FIXTURE_TASK = { id: 'task-001', specialization: 'gameplay', description: 'Player can jump', successCriterion: 'Jump works', needsArt: false, status: 'todo', attempts: 0 }
+const FIXTURE_TASK = { id: 'task-001', specialization: 'gameplay', description: 'Player can jump', successCriterion: 'Jump works', needsArt: false, needsAnimation: false, status: 'todo', attempts: 0 }
+const FIXTURE_ANIMATED_TASK = { ...FIXTURE_TASK, id: 'task-002', description: 'Door opens when key is collected', needsArt: true, needsAnimation: true }
 const FIXTURE_TARGET_PATH = '/tmp/fake-project'
 
 test('visionPrompt includes the game idea', () => {
@@ -56,11 +57,36 @@ test('implementPrompt reads as programmer on attempt 1 and fixer on a later retr
   assert.ok(fixerResult.includes('fixer'))
 })
 
+test('implementPrompt notes an existing Animator when the task needsAnimation', () => {
+  const withAnimation = implementPrompt(FIXTURE_ANIMATED_TASK, 1, null, FIXTURE_TARGET_PATH)
+  assert.ok(withAnimation.includes('Animator'))
+
+  const withoutAnimation = implementPrompt(FIXTURE_TASK, 1, null, FIXTURE_TARGET_PATH)
+  assert.ok(!withoutAnimation.includes('Animator Controller with at least an idle state'))
+})
+
 test('artPrompt includes the task id', () => {
   const result = artPrompt(FIXTURE_TASK, FIXTURE_TARGET_PATH)
   assert.equal(typeof result, 'string')
   assert.ok(result.length > 0)
   assert.ok(result.includes(FIXTURE_TASK.id))
+})
+
+test('animatedArtPrompt includes the task id and, when given feedback, includes it', () => {
+  const firstAttempt = animatedArtPrompt(FIXTURE_ANIMATED_TASK, null, FIXTURE_TARGET_PATH)
+  assert.equal(typeof firstAttempt, 'string')
+  assert.ok(firstAttempt.includes(FIXTURE_ANIMATED_TASK.id))
+  assert.ok(!firstAttempt.includes('was rejected'))
+
+  const retry = animatedArtPrompt(FIXTURE_ANIMATED_TASK, 'Missing the Open state entirely', FIXTURE_TARGET_PATH)
+  assert.ok(retry.includes('Missing the Open state entirely'))
+})
+
+test('animationReviewPrompt includes the task description', () => {
+  const result = animationReviewPrompt(FIXTURE_ANIMATED_TASK, FIXTURE_TARGET_PATH)
+  assert.equal(typeof result, 'string')
+  assert.ok(result.length > 0)
+  assert.ok(result.includes(FIXTURE_ANIMATED_TASK.description))
 })
 
 test('scenarioTestPrompt includes the task id and attempt number', () => {

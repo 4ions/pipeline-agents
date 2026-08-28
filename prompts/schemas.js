@@ -10,13 +10,14 @@ export const VISION_SCHEMA = {
 
 export const BACKLOG_TASK_SCHEMA = {
   type: 'object',
-  required: ['id', 'specialization', 'description', 'successCriterion', 'needsArt', 'status', 'attempts'],
+  required: ['id', 'specialization', 'description', 'successCriterion', 'needsArt', 'needsAnimation', 'status', 'attempts'],
   properties: {
     id: { type: 'string' },
     specialization: { type: 'string', enum: ['gameplay', 'ui', 'ai', 'network', 'graphics', 'tools'] },
     description: { type: 'string' },
     successCriterion: { type: 'string', description: 'A concrete, checkable condition the Tester can verify via input+state' },
     needsArt: { type: 'boolean' },
+    needsAnimation: { type: 'boolean', description: 'true if this task\'s GameObject moves or reacts to something and needs at least an idle state plus one action state' },
     status: { type: 'string', enum: ['todo', 'in_progress', 'done', 'blocked'] },
     attempts: { type: 'number' },
   },
@@ -44,6 +45,18 @@ export const TEST_RESULT_SCHEMA = {
         description: { type: 'string' },
         reproSteps: { type: 'array', items: { type: 'string' } },
       },
+    },
+  },
+}
+
+export const ANIMATION_REVIEW_SCHEMA = {
+  type: 'object',
+  required: ['accepted', 'feedback'],
+  properties: {
+    accepted: { type: 'boolean' },
+    feedback: {
+      type: 'string',
+      description: 'If accepted, a short note confirming what exists. If not accepted, concrete, specific feedback the Artist can act on — name the exact problem.',
     },
   },
 }

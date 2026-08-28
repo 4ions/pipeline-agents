@@ -12,7 +12,7 @@ test('BACKLOG_SCHEMA requires gdd and a tasks array', () => {
   assert.deepEqual(new Set(BACKLOG_SCHEMA.required), new Set(['gdd', 'tasks']))
 })
 
-test('BACKLOG_SCHEMA items match what validateBacklogTask expects, and needsArt is required', () => {
+test('BACKLOG_SCHEMA items match what validateBacklogTask expects, and needsArt/needsAnimation are required', () => {
   const itemSchema = BACKLOG_SCHEMA.properties.tasks.items
   const sample = {
     id: 'task-001',
@@ -20,6 +20,7 @@ test('BACKLOG_SCHEMA items match what validateBacklogTask expects, and needsArt 
     description: 'Player can jump over a 1-unit obstacle',
     successCriterion: 'Jump input near a 1-unit box results in the player past it without collision.',
     needsArt: false,
+    needsAnimation: false,
     status: 'todo',
     attempts: 0,
   }
@@ -27,6 +28,7 @@ test('BACKLOG_SCHEMA items match what validateBacklogTask expects, and needsArt 
     assert.ok(field in sample, `sample is missing required field ${field}`)
   }
   assert.ok(itemSchema.required.includes('needsArt'))
+  assert.ok(itemSchema.required.includes('needsAnimation'))
   const result = validateBacklogTask(sample)
   assert.equal(result.valid, true)
 })
