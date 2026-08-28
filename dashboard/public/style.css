@@ -1,0 +1,30 @@
+/* dashboard/public/style.css */
+:root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+body { margin: 2rem; }
+#roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; }
+.role-card {
+  border-radius: 10px;
+  padding: 1rem;
+  border: 2px solid #888;
+  transition: border-color 0.3s ease, transform 0.2s ease;
+}
+.role-card.status-working { border-color: #3b82f6; animation: pulse 1.4s ease-in-out infinite; }
+.role-card.status-blocked { border-color: #ef4444; animation: shake 0.4s ease-in-out; }
+.role-card.status-idle { opacity: 0.6; }
+.role-name { font-weight: 700; text-transform: capitalize; }
+.role-status { font-size: 0.85rem; opacity: 0.8; }
+.role-detail { font-size: 0.8rem; margin-top: 0.4rem; }
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(59, 130, 246, 0); }
+}
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
+
+#timeline { list-style: none; padding: 0; max-height: 300px; overflow-y: auto; }
+.timeline-entry { padding: 0.3rem 0; border-bottom: 1px solid #ccc3; font-size: 0.85rem; }
+.timeline-entry.event-blocked { color: #ef4444; }
