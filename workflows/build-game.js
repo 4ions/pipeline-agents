@@ -2,6 +2,19 @@
 // Source: schemas.js, director.js, designer.js, programmer.js, artist.js, tester.js + build-game.body.js
 // Regenerate with: node bin/build-workflow.js
 
+export const meta = {
+  name: 'build-game',
+  description: 'Build and genuinely playtest a Unity game from a prompt',
+  phases: [
+    { title: 'Vision' },
+    { title: 'Design' },
+    { title: 'Implementation' },
+    { title: 'Director Review' },
+    { title: 'Full Playtest' },
+    { title: 'Report' },
+  ],
+}
+
 const VISION_SCHEMA = {
   type: 'object',
   required: ['identity', 'scope', 'priorities'],
@@ -282,25 +295,7 @@ Return whether the playthrough completed without breaking, and a list of
 any issues found (empty if none).`
 }
 
-// workflows/build-game.body.js
-// This file is NOT run directly — Task 8's generator prepends the
-// un-exported contents of prompts/schemas.js, director.js, designer.js,
-// programmer.js, artist.js, and tester.js above it, then writes the
-// result to workflows/build-game.js. Regenerate after any prompts/*.js
-// change with: node bin/build-workflow.js
 
-export const meta = {
-  name: 'build-game',
-  description: 'Build and genuinely playtest a Unity game from a prompt',
-  phases: [
-    { title: 'Vision' },
-    { title: 'Design' },
-    { title: 'Implementation' },
-    { title: 'Director Review' },
-    { title: 'Full Playtest' },
-    { title: 'Report' },
-  ],
-}
 
 // 3 same-strategy retries + 1 alternative-strategy attempt on the 4th —
 // see implementPrompt's `attempt >= 4` branch, which must stay in sync
