@@ -20,7 +20,7 @@ when you finish, e.g. "- Vision written: <one-line summary>".
 Return the vision as structured data matching the required schema.`
 }
 
-export function escalationPrompt(vision, blockedTasks) {
+export function escalationPrompt(vision, blockedTasks, targetProjectPath) {
   const taskList = blockedTasks.map(t => `- [${t.task.id}] ${t.task.description} (${t.attempts} attempts failed; last result: ${JSON.stringify(t.lastResult)})`).join('\n')
   return `You are the Director for a Unity game whose vision is:
 """${vision.identity}"""
