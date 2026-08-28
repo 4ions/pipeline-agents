@@ -66,6 +66,11 @@ if (!design || !Array.isArray(design.tasks)) {
 }
 
 phase('Implementation')
+// KNOWN LIMITATION: concurrent Tester agents each read-modify-write the
+// whole of backlog.json/bugs.json (see prompts/tester.js), which can lose
+// updates under concurrent completion — the same hazard activity.log.jsonl
+// solved by being append-only, not yet applied here. Not fixed in this
+// version; see docs/superpowers/plans/2026-08-27-auto-game-build-plan.md.
 const taskResults = await pipeline(
   design.tasks,
   (task) => implementAndTestTask(task, args.targetProjectPath)
@@ -103,7 +108,8 @@ if (blocked.length > 0) {
 }
 
 phase('Full Playtest')
-const playtestResult = await agent(fullPlaytestPrompt(vision, design, args.targetProjectPath), {
+const completedTasks = taskResults.filter(r => r && r.status === 'done').map(r => r.task)
+const playtestResult = await agent(fullPlaytestPrompt(vision, { tasks: completedTasks }, args.targetProjectPath), {
   schema: PLAYTEST_SCHEMA,
   phase: 'Full Playtest',
 })

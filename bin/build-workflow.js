@@ -1,5 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 export async function generateWorkflowScript(promptFiles, bodyFile) {
   const promptSources = await Promise.all(promptFiles.map(f => readFile(f, 'utf8')))
@@ -14,8 +15,8 @@ export async function generateWorkflowScript(promptFiles, bodyFile) {
 }
 
 // CLI entrypoint: `node bin/build-workflow.js`
-if (import.meta.url === `file://${process.argv[1]}`) {
-  const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
+if (fileURLToPath(import.meta.url) === path.resolve(process.argv[1] ?? '')) {
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
   const promptFiles = ['schemas.js', 'director.js', 'designer.js', 'programmer.js', 'artist.js', 'tester.js']
     .map(name => path.join(root, 'prompts', name))
   const bodyFile = path.join(root, 'workflows', 'build-game.body.js')

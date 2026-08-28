@@ -45,7 +45,7 @@ export function createServer(pipelineParentDir, publicDir = DEFAULT_PUBLIC_DIR) 
 }
 
 // CLI entrypoint: `node dashboard/server.js <target-unity-project-dir> [port]`
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (fileURLToPath(import.meta.url) === path.resolve(process.argv[1] ?? '')) {
   const target = process.argv[2]
   const port = Number(process.argv[3] ?? 4173)
   if (!target) {
@@ -53,5 +53,5 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     process.exit(1)
   }
   const server = createServer(path.resolve(target))
-  server.listen(port, () => console.log(`Dashboard running at http://localhost:${port}`))
+  server.listen(port, '127.0.0.1', () => console.log(`Dashboard running at http://localhost:${port}`))
 }

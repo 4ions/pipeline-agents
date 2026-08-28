@@ -38,3 +38,20 @@ a new one will pick up in-progress work rather than starting over (see
 "Open Items" in the spec — this initial version always starts a fresh
 Vision/Design pass; incremental resume of an in-progress backlog is
 follow-up work, not covered by this plan).
+
+## Known Limitations
+
+- Concurrent Tester agents each read-modify-write the whole of
+  `.pipeline/backlog.json` and `.pipeline/bugs.json` (see
+  `prompts/tester.js`), which can lose updates when two Testers finish
+  near-simultaneously — the same lost-update hazard `activity.log.jsonl`
+  solved by being append-only, not yet applied to these two files. Not
+  fixed in this version.
+- `finalReview.reopenTaskIds` (backlog tasks the Director flagged for
+  reopening) and the full playtest's `issues` array are both returned by
+  the workflow but not automatically acted on — no task is actually
+  reopened or turned into a new bug from them; a human reading the final
+  report is expected to decide what to do with them. (This mirrors the
+  existing documented limitation about "simplify" Director decisions not
+  automatically re-entering the implement loop — same category of
+  "recorded but not auto-acted-on" behavior.)

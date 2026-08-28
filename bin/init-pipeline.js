@@ -1,5 +1,6 @@
 import { mkdir, writeFile, access } from 'node:fs/promises'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const INITIAL_FILES = {
   'vision.md': '# Vision\n\n(not yet generated)\n',
@@ -28,7 +29,7 @@ export async function scaffoldPipeline(targetDir) {
 }
 
 // CLI entrypoint: `node bin/init-pipeline.js <target-project-dir>`
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (fileURLToPath(import.meta.url) === path.resolve(process.argv[1] ?? '')) {
   const target = process.argv[2]
   if (!target) {
     console.error('Usage: node bin/init-pipeline.js <target-unity-project-dir>')
