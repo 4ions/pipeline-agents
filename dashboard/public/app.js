@@ -9,11 +9,23 @@ function renderRoles(roles) {
     const info = roles[role] ?? { status: 'idle', taskId: null, detail: null }
     const card = document.createElement('div')
     card.className = `role-card status-${info.status}`
-    card.innerHTML = `
-      <div class="role-name">${role}</div>
-      <div class="role-status">${info.status}</div>
-      <div class="role-detail">${info.detail ?? ''}</div>
-    `
+
+    const nameEl = document.createElement('div')
+    nameEl.className = 'role-name'
+    nameEl.textContent = role
+
+    const statusEl = document.createElement('div')
+    statusEl.className = 'role-status'
+    statusEl.textContent = info.status
+
+    const detailEl = document.createElement('div')
+    detailEl.className = 'role-detail'
+    detailEl.textContent = info.detail ?? ''
+
+    card.appendChild(nameEl)
+    card.appendChild(statusEl)
+    card.appendChild(detailEl)
+
     rolesEl.appendChild(card)
   }
 }
