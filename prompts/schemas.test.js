@@ -1,7 +1,7 @@
 // prompts/schemas.test.js
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { VISION_SCHEMA, BACKLOG_SCHEMA } from './schemas.js'
+import { VISION_SCHEMA, BACKLOG_SCHEMA, TEST_RESULT_SCHEMA, PLAYTEST_SCHEMA } from './schemas.js'
 import { validateBacklogTask, TASK_STATUSES } from '../lib/stateSchemas.js'
 
 test('VISION_SCHEMA declares the required top-level fields', () => {
@@ -34,4 +34,12 @@ test('BACKLOG_SCHEMA items match what validateBacklogTask expects, and needsArt 
 test('BACKLOG_TASK_SCHEMA status enum matches TASK_STATUSES exactly', () => {
   const itemSchema = BACKLOG_SCHEMA.properties.tasks.items
   assert.deepEqual(itemSchema.properties.status.enum, TASK_STATUSES)
+})
+
+test('TEST_RESULT_SCHEMA requires passed and evidence', () => {
+  assert.deepEqual(new Set(TEST_RESULT_SCHEMA.required), new Set(['passed', 'evidence']))
+})
+
+test('PLAYTEST_SCHEMA requires completed and issues', () => {
+  assert.deepEqual(new Set(PLAYTEST_SCHEMA.required), new Set(['completed', 'issues']))
 })

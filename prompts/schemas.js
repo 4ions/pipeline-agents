@@ -30,3 +30,29 @@ export const BACKLOG_SCHEMA = {
     tasks: { type: 'array', items: BACKLOG_TASK_SCHEMA },
   },
 }
+
+export const TEST_RESULT_SCHEMA = {
+  type: 'object',
+  required: ['passed', 'evidence'],
+  properties: {
+    passed: { type: 'boolean' },
+    evidence: { type: 'string', description: 'What was observed via input+state (and a screenshot check, if taken) that supports the verdict' },
+    bug: {
+      type: 'object',
+      description: 'Present only if passed is false',
+      properties: {
+        description: { type: 'string' },
+        reproSteps: { type: 'array', items: { type: 'string' } },
+      },
+    },
+  },
+}
+
+export const PLAYTEST_SCHEMA = {
+  type: 'object',
+  required: ['completed', 'issues'],
+  properties: {
+    completed: { type: 'boolean', description: 'Whether the full playthrough reached its end without breaking' },
+    issues: { type: 'array', items: { type: 'string' }, description: 'Any problems found during the full playthrough, empty if none' },
+  },
+}
