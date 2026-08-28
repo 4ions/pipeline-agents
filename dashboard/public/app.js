@@ -1,17 +1,37 @@
 const ROLE_ORDER = ['director', 'designer', 'programmer', 'artist', 'tester', 'fixer']
+const FRAME_COUNTS = { idle: 3, walk: 4 }
+const FPS = 60
 const timelineEl = document.getElementById('timeline')
 let lastTimelineLength = 0
 let lastHandledIndex = 0
 
+// Per-role sprite animation state — real frame images, swapped by
+// changing <img src>, not a CSS background-position slide trick.
+const roleAnim = {}
+for (const role of ROLE_ORDER) {
+  roleAnim[role] = { animState: 'idle', frameIndex: 0 }
+}
+
+function frameUrl(role, animState, index) {
+  return `/sprites/frames/${role}_${animState}_${index}.png`
+}
+
 function renderRoles(roles) {
   for (const role of ROLE_ORDER) {
     const info = roles[role] ?? { status: 'idle', taskId: null, detail: null }
-    const desk = document.querySelector(`.room[data-role="${role}"]`)
-    if (!desk) continue
-    desk.classList.remove('status-idle', 'status-working', 'status-blocked')
-    desk.classList.add(`status-${info.status}`)
-    const detailEl = desk.querySelector(':scope > .detail')
+    const room = document.querySelector(`.room[data-role="${role}"]`)
+    if (!room) continue
+    room.classList.remove('status-idle', 'status-working', 'status-blocked')
+    room.classList.add(`status-${info.status}`)
+    const detailEl = room.querySelector(':scope > .detail')
     detailEl.textContent = info.detail ?? ''
+
+    const wantState = info.status === 'working' ? 'walk' : 'idle'
+    const anim = roleAnim[role]
+    if (anim.animState !== wantState) {
+      anim.animState = wantState
+      anim.frameIndex = 0
+    }
   }
 }
 
@@ -60,6 +80,25 @@ function triggerWalk(fromRole, toRole) {
   fromAvatar.classList.add('walking')
   fromAvatar.addEventListener('animationend', () => fromAvatar.classList.remove('walking'), { once: true })
 }
+
+// Single shared frame loop: every 1000/FPS ms, advance each role's frame
+// index and REPLACE its <img src> outright — a real per-frame image swap,
+// not an animated CSS position.
+let lastFrameTime = 0
+function animationLoop(timestamp) {
+  if (timestamp - lastFrameTime >= 1000 / FPS) {
+    lastFrameTime = timestamp
+    for (const role of ROLE_ORDER) {
+      const anim = roleAnim[role]
+      const count = FRAME_COUNTS[anim.animState]
+      anim.frameIndex = (anim.frameIndex + 1) % count
+      const img = document.querySelector(`.room[data-role="${role}"] .avatar`)
+      if (img) img.src = frameUrl(role, anim.animState, anim.frameIndex)
+    }
+  }
+  requestAnimationFrame(animationLoop)
+}
+requestAnimationFrame(animationLoop)
 
 async function poll() {
   try {

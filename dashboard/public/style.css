@@ -74,35 +74,16 @@ body { margin: 2rem; background: #14161c; color: #eee; }
 }
 
 /* --- sprite animation ---
-   Both sheets are always the SAME total source size, 1376x768, whether
-   they hold 3 idle frames or 4 walk frames — only the frame COUNT
-   differs, not the sheet's pixel dimensions. Scaled to a fixed display
-   height of 100px, the whole sheet is always 1376 * (100/768) =
-   179.1667px wide, for either sheet. So background-size is the same
-   fixed pixel size in both states; only the container width (= one
-   frame's width) and the step count/keyframe end-position differ. Using
-   exact pixel math here (not percentages) avoids the classic off-by-one
-   sizing bug where the container ends up wider than one frame and two
-   frames show at once. */
-:root {
-  --sheet-w: 179.1667px; /* 1376 * (100/768) */
-  --idle-frame-w: 59.7222px; /* --sheet-w / 3 */
-  --walk-frame-w: 44.7917px; /* --sheet-w / 4 */
-}
-
+   Real frame images, swapped by app.js setting <img src> directly every
+   tick — not a CSS background-position slide. This element just needs to
+   render whatever frame is currently assigned to it at a fixed height so
+   layout doesn't jump between frames of slightly different width. */
 .avatar {
-  width: var(--idle-frame-w);
   height: 100px;
-  background-repeat: no-repeat;
-  background-image: var(--sprite-idle);
-  background-size: var(--sheet-w) 100px;
-  background-position: 0 0;
+  width: auto;
+  display: block;
   filter: drop-shadow(0 4px 3px rgba(0, 0, 0, 0.45));
-  animation: sprite-play-idle 0.05s steps(3) infinite;
 }
-
-@keyframes sprite-play-idle { to { background-position: calc(-2 * var(--idle-frame-w)) 0; } }
-@keyframes sprite-play-walk { to { background-position: calc(-3 * var(--walk-frame-w)) 0; } }
 
 .detail {
   font-size: 0.72rem;
@@ -116,18 +97,13 @@ body { margin: 2rem; background: #14161c; color: #eee; }
 
 /* --- status states --- */
 .room.status-working { box-shadow: 0 0 0 4px #3b82f6 inset; }
-.room.status-working .avatar {
-  width: var(--walk-frame-w);
-  background-image: var(--sprite-walk);
-  animation: sprite-play-walk 0.0667s steps(4) infinite;
-}
 
 .room.status-idle .avatar { opacity: 0.92; }
 
 .room.status-blocked { box-shadow: 0 0 0 4px #ef4444 inset; }
 .room.status-blocked .avatar {
   filter: drop-shadow(0 4px 3px rgba(0, 0, 0, 0.45)) sepia(1) hue-rotate(-50deg) saturate(6);
-  animation: sprite-play-idle 0.05s steps(3) infinite, shake 0.35s ease-in-out infinite;
+  animation: shake 0.35s ease-in-out infinite;
 }
 .room.status-blocked::after {
   content: "!";
@@ -167,11 +143,6 @@ body { margin: 2rem; background: #14161c; color: #eee; }
   100% { transform: translate(0, 0); }
 }
 .avatar-wrap.walking { animation: walk-round-trip 1.6s ease-in-out; z-index: 50; }
-.avatar-wrap.walking .avatar {
-  width: var(--walk-frame-w);
-  background-image: var(--sprite-walk);
-  animation: sprite-play-walk 0.0667s steps(4) infinite;
-}
 
 /* --- timeline --- */
 h1, h2 { padding: 0 0.2rem; }
