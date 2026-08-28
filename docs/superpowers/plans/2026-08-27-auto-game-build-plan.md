@@ -743,7 +743,7 @@ git commit -m "Add animated dashboard frontend for live pipeline progress"
 - Test: `auto-game-build/prompts/schemas.test.js`
 
 **Interfaces:**
-- Produces: `VISION_SCHEMA`, `BACKLOG_SCHEMA` (JSON Schema objects, for `agent(..., {schema})`); `visionPrompt(gameIdea, targetProjectPath)`, `escalationPrompt(vision, blockedTasks)`, `finalReviewPrompt(vision, gdd, taskResults, playtestResult, directorDecisions)` from `director.js`; `designPrompt(vision, targetProjectPath)` from `designer.js`. All prompt functions return plain strings. Consumed by Task 9 (the Workflow orchestration body).
+- Produces: `VISION_SCHEMA`, `BACKLOG_SCHEMA` (JSON Schema objects, for `agent(..., {schema})`); `visionPrompt(gameIdea, targetProjectPath)`, `escalationPrompt(vision, blockedTasks, targetProjectPath)`, `finalReviewPrompt(vision, gdd, taskResults, playtestResult, directorDecisions)` from `director.js`; `designPrompt(vision, targetProjectPath)` from `designer.js`. All prompt functions return plain strings. Consumed by Task 9 (the Workflow orchestration body).
 - Consumes: `validateBacklogTask`, `TASK_STATUSES`, `BUG_STATUSES` from `../lib/stateSchemas.js` (Task 1) inside the test — to cross-check that a sample object matching `BACKLOG_SCHEMA` also passes the hand-rolled validator, and that the schema's status enum literal doesn't drift from `TASK_STATUSES` (keeps the two in sync even though the runtime schema can't import the constant — see Task 1's Interfaces note).
 
 - [ ] **Step 1: Write the failing test**
@@ -862,7 +862,7 @@ when you finish, e.g. "- Vision written: <one-line summary>".
 Return the vision as structured data matching the required schema.`
 }
 
-export function escalationPrompt(vision, blockedTasks) {
+export function escalationPrompt(vision, blockedTasks, targetProjectPath) {
   const taskList = blockedTasks.map(t => `- [${t.task.id}] ${t.task.description} (${t.attempts} attempts failed; last result: ${JSON.stringify(t.lastResult)})`).join('\n')
   return `You are the Director for a Unity game whose vision is:
 """${vision.identity}"""
@@ -1365,7 +1365,7 @@ const blocked = taskResults.filter(r => r && r.status === 'blocked')
 let directorDecisions = null
 if (blocked.length > 0) {
   log(`${blocked.length} task(s) blocked after ${MAX_FIX_ATTEMPTS} attempts each — asking the Director`)
-  directorDecisions = await agent(escalationPrompt(vision, blocked), {
+  directorDecisions = await agent(escalationPrompt(vision, blocked, args.targetProjectPath), {
     phase: 'Director Review',
     schema: { type: 'object', required: ['decisions'], properties: { decisions: { type: 'array', items: {
       type: 'object', required: ['taskId', 'decision', 'reason'],
