@@ -98,7 +98,7 @@ body { margin: 2rem; background: #14161c; color: #eee; }
   background-size: var(--sheet-w) 100px;
   background-position: 0 0;
   filter: drop-shadow(0 4px 3px rgba(0, 0, 0, 0.45));
-  animation: sprite-play-idle 3.6s steps(3) infinite;
+  animation: sprite-play-idle 2.1s steps(3) infinite;
 }
 
 @keyframes sprite-play-idle { to { background-position: calc(-2 * var(--idle-frame-w)) 0; } }
@@ -119,7 +119,7 @@ body { margin: 2rem; background: #14161c; color: #eee; }
 .room.status-working .avatar {
   width: var(--walk-frame-w);
   background-image: var(--sprite-walk);
-  animation: sprite-play-walk 1.6s steps(4) infinite;
+  animation: sprite-play-walk 0.6s steps(4) infinite;
 }
 
 .room.status-idle .avatar { opacity: 0.92; }
@@ -127,7 +127,7 @@ body { margin: 2rem; background: #14161c; color: #eee; }
 .room.status-blocked { box-shadow: 0 0 0 4px #ef4444 inset; }
 .room.status-blocked .avatar {
   filter: drop-shadow(0 4px 3px rgba(0, 0, 0, 0.45)) sepia(1) hue-rotate(-50deg) saturate(6);
-  animation: sprite-play-idle 3.6s steps(3) infinite, shake 0.35s ease-in-out infinite;
+  animation: sprite-play-idle 2.1s steps(3) infinite, shake 0.35s ease-in-out infinite;
 }
 .room.status-blocked::after {
   content: "!";
@@ -170,7 +170,7 @@ body { margin: 2rem; background: #14161c; color: #eee; }
 .avatar-wrap.walking .avatar {
   width: var(--walk-frame-w);
   background-image: var(--sprite-walk);
-  animation: sprite-play-walk 0.9s steps(4) infinite;
+  animation: sprite-play-walk 0.6s steps(4) infinite;
 }
 
 /* --- timeline --- */
