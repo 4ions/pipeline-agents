@@ -1,6 +1,8 @@
 const ROLE_ORDER = ['director', 'designer', 'programmer', 'artist', 'tester', 'fixer']
 const FRAME_COUNTS = { idle: 3, walk: 4 }
-const FPS = 60
+// Researched pixel-art animation standards: idle breathing/blink reads
+// well at 4-6fps, walk cycles at 8-12fps — not one blanket rate.
+const FPS_BY_STATE = { idle: 6, walk: 10 }
 const timelineEl = document.getElementById('timeline')
 let lastTimelineLength = 0
 let lastHandledIndex = 0
@@ -9,7 +11,7 @@ let lastHandledIndex = 0
 // changing <img src>, not a CSS background-position slide trick.
 const roleAnim = {}
 for (const role of ROLE_ORDER) {
-  roleAnim[role] = { animState: 'idle', frameIndex: 0 }
+  roleAnim[role] = { animState: 'idle', frameIndex: 0, lastTick: 0 }
 }
 
 function frameUrl(role, animState, index) {
@@ -81,15 +83,15 @@ function triggerWalk(fromRole, toRole) {
   fromAvatar.addEventListener('animationend', () => fromAvatar.classList.remove('walking'), { once: true })
 }
 
-// Single shared frame loop: every 1000/FPS ms, advance each role's frame
-// index and REPLACE its <img src> outright — a real per-frame image swap,
-// not an animated CSS position.
-let lastFrameTime = 0
+// Shared frame loop, but each role advances at ITS current state's own
+// fps (idle vs walk), not one blanket rate — each role's <img src> is
+// REPLACED outright when its turn comes, a real per-frame image swap.
 function animationLoop(timestamp) {
-  if (timestamp - lastFrameTime >= 1000 / FPS) {
-    lastFrameTime = timestamp
-    for (const role of ROLE_ORDER) {
-      const anim = roleAnim[role]
+  for (const role of ROLE_ORDER) {
+    const anim = roleAnim[role]
+    const interval = 1000 / FPS_BY_STATE[anim.animState]
+    if (timestamp - anim.lastTick >= interval) {
+      anim.lastTick = timestamp
       const count = FRAME_COUNTS[anim.animState]
       anim.frameIndex = (anim.frameIndex + 1) % count
       const img = document.querySelector(`.room[data-role="${role}"] .avatar`)
