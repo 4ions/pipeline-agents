@@ -31,9 +31,30 @@ scene is the correct one — operating on the wrong scene means editing
 content this task was never meant to touch, which is a serious error, not
 a minor slip.
 
-Use the Unity MCP tools available to you (search for them if you don't
-see them yet) to write/edit C# scripts and configure the scene/GameObjects
-needed. Keep the change scoped to this task and to the confirmed correct
+CRITICAL — this pipeline builds 2D games EXCLUSIVELY, no exceptions.
+Never use 3D primitives (Cube, Sphere, Capsule, Plane) or 3D physics
+(Rigidbody, BoxCollider, CapsuleCollider) for gameplay objects, even for a
+placeholder. Every visible gameplay object must be a GameObject with a
+SpriteRenderer component (a flat-colored placeholder sprite is fine), and
+movement/collision must use Rigidbody2D + BoxCollider2D/CircleCollider2D/
+PolygonCollider2D. The scene's camera must be Orthographic, not
+Perspective — check this and fix it if it's wrong, even if that's not
+explicitly what this task asked for, since a Perspective camera makes 2D
+sprites render as if the scene were 3D (this exact bug has happened
+before: a 2D door was built as a 3D primitive and looked like a wall
+floating in perspective instead of a flat 2D sprite).
+
+Use the funplay-unity MCP tools (search for "funplay" if you don't see
+them yet — you have full Editor control: create_game_object,
+add_component, set_component_property/set_component_properties,
+set_transform, create_script/edit_script/patch_script,
+create_material/assign_material, request_recompile,
+get_compilation_errors, get_hierarchy, get_scene_info, open_scene). Use
+add_component with type "SpriteRenderer", "Rigidbody2D", and the
+appropriate Collider2D type — do NOT use create_primitive, which creates
+3D mesh-based primitives. After editing any .cs script file, call
+request_recompile then get_compilation_errors before considering the task
+done. Keep the change scoped to this task and to the confirmed correct
 scene. When done, append a line to
 ${targetProjectPath}/.pipeline/activity.log.jsonl: {"ts": "<ISO timestamp
 from shell 'date -u +%Y-%m-%dT%H:%M:%SZ'>", "role": "${role}",

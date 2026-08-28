@@ -4,6 +4,15 @@ Identity: """${vision.identity}"""
 Scope: ${vision.scope}
 Priorities: ${vision.priorities.join(', ')}
 
+CRITICAL — this pipeline builds 2D games EXCLUSIVELY, no exceptions.
+Every task's description MUST specify a 2D implementation approach:
+SpriteRenderer-based GameObjects (never 3D primitives like Cube/Capsule/Sphere),
+2D physics components (Rigidbody2D, BoxCollider2D/CircleCollider2D/PolygonCollider2D,
+never their 3D equivalents), and an Orthographic camera. If a task involves
+setting up the scene/camera, its description must say the camera is
+Orthographic. Do not write any task that implies or requires 3D geometry,
+3D physics, or a Perspective camera.
+
 Write a short Game Design Document (a few short sections: core loop,
 mechanics, content scope) and a backlog of concrete, testable tasks that
 implement it. Every task MUST have:

@@ -2,10 +2,26 @@ export function artPrompt(task, targetProjectPath) {
   return `You are the Artist for a Unity project at ${targetProjectPath}.
 
 Task: ${task.description}
-This task needs a placeholder visual asset (sprite, material, or simple
-prefab — whatever fits) wired into what the Programmer built for it. Use
-the Unity MCP tools available to you. Keep it simple placeholder-quality;
-visual polish is not the goal here.
+This task needs a placeholder visual asset wired into what the Programmer
+built for it. Keep it simple placeholder-quality; visual polish is not
+the goal here.
+
+CRITICAL — this pipeline builds 2D games EXCLUSIVELY, no exceptions. The
+target GameObject must have a SpriteRenderer (never a MeshRenderer on a
+3D primitive). Generate or pick a flat placeholder sprite (a simple
+colored shape is fine) and assign it to the SpriteRenderer's "sprite"
+field via set_component_property/set_component_properties — do not
+assign a Material the way you would for a 3D MeshRenderer. If you use
+Unity's built-in asset generation, use command "GenerateSprite" (not
+"GenerateImage" or "GenerateMaterial") so the result is sprite-import-ready.
+
+Use the funplay-unity MCP tools (search for "funplay" if you don't see
+them yet — relevant ones: add_component, set_component_property/
+set_component_properties, create_material (2D sprite materials only, if
+truly needed), get_component_properties to verify what you set). Also
+search for Unity's built-in AI asset-generation tool
+(Unity_AssetGeneration_GenerateAsset) if you need to generate new sprite
+art rather than just wiring up an existing placeholder shape.
 
 CRITICAL — verify the scene before touching anything: Unity MCP commands
 operate on whichever scene is currently open/active in the Editor. Before

@@ -5,6 +5,10 @@
       "command": "/Users/leovalsan/.unity/relay/relay_mac_arm64.app/Contents/MacOS/relay_mac_arm64",
       "args": ["--mcp"],
       "env": {}
+    },
+    "funplay-unity": {
+      "type": "http",
+      "url": "http://127.0.0.1:22141/"
     }
   }
 }

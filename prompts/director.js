@@ -4,6 +4,13 @@ export function visionPrompt(gameIdea, targetProjectPath) {
 The user's game idea: """${gameIdea}"""
 Target Unity project path: ${targetProjectPath}
 
+CRITICAL — this pipeline builds 2D games EXCLUSIVELY, no exceptions, even
+if the game idea above doesn't mention it. Frame "identity" around a 2D
+perspective (top-down, side-scrolling, isometric-as-2D-sprites, etc.) —
+never a 3D game. State this 2D framing explicitly in "identity" so every
+later agent (which only sees this vision, not the original game idea
+text) knows it's building 2D.
+
 Write the game's vision: its identity (what kind of game, its core hook),
 its scope (what's in and explicitly out for this build — keep it small
 enough to actually finish), and priorities (ordered list of what matters
@@ -61,8 +68,12 @@ Full playtest result: ${playtestResult ? JSON.stringify(playtestResult) : 'MISSI
 ${directorDecisions ? `Earlier escalation decisions you already made on blocked tasks: ${JSON.stringify(directorDecisions)}` : 'No tasks were blocked.'}
 
 Check whether what was actually built still matches the original vision
-(not just whether it technically works). If something drifted from the
-vision in a way that matters, list which backlog task ids should be
+(not just whether it technically works). This pipeline builds 2D games
+exclusively — if any task result's evidence suggests 3D primitives, 3D
+physics, or a Perspective camera were used instead of SpriteRenderer/2D
+physics/Orthographic camera, that is a drift from the vision that matters
+and its task id must be listed to reopen. If something else drifted from
+the vision in a way that matters, list which backlog task ids should be
 reopened and why. Otherwise confirm the game is ready to report as done.
 Append one line to .pipeline/progress-log.md summarizing your
 verdict. Return your review as structured data.`

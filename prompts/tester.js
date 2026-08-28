@@ -13,14 +13,23 @@ scene first if it isn't already active. If the task doesn't name a scene,
 check ${targetProjectPath}/.pipeline/gdd.md for the scene this build is
 working in. Testing the wrong scene produces a meaningless result.
 
-Use the play-mode/input MCP tools available to you (search for them if
-you don't see them yet — look for Play Mode control, simulated
-input/key-press, and screenshot capture tools) to actually operate the
-game and check this criterion: enter Play Mode, simulate the relevant
-input(s), and read back game state (position, health, score, etc.) to
-verify the criterion. Take a screenshot only if the criterion has a
-visual component the state alone can't confirm (e.g. "the pause menu is
-visible").
+CRITICAL — this pipeline builds 2D games EXCLUSIVELY. If while testing
+you observe 3D geometry, a Perspective camera, or objects that look like
+they're floating in 3D space instead of flat 2D sprites, that is itself a
+FAILURE of this task, regardless of what the success criterion literally
+asked — report it as a bug (e.g. "door renders as a 3D primitive under a
+perspective camera instead of a flat 2D sprite").
+
+Use the funplay-unity MCP tools (search for "funplay" if you don't see
+them yet): enter_play_mode, simulate_key_press/simulate_key_combo for
+keyboard input, simulate_mouse_click/simulate_mouse_drag for mouse input,
+get_console_logs (check for errors after every action), get_component_properties
+or get_game_object_info to read back game state (position, health, score,
+etc.), capture_game_view for a screenshot when the criterion has a visual
+component the state alone can't confirm (e.g. "the pause menu is
+visible"), and exit_play_mode when done. Poll get_reload_recovery_status
+after enter_play_mode before your next call, since the connection briefly
+drops during a domain reload.
 
 Append a "start" line and, when done, a "done" line to
 ${targetProjectPath}/.pipeline/activity.log.jsonl: {"ts": "<ISO
@@ -58,7 +67,13 @@ Unity project at ${targetProjectPath}, whose vision is:
 The backlog of features that should now be present:
 ${taskSummaries}
 
-Use the play-mode/input MCP tools available to you to play through the
+This pipeline builds 2D games EXCLUSIVELY — if anything renders as 3D
+geometry or the camera is Perspective instead of Orthographic, report
+that as an issue even if the gameplay otherwise works.
+
+Use the funplay-unity MCP tools (enter_play_mode, simulate_key_press/
+simulate_key_combo, simulate_mouse_click/simulate_mouse_drag,
+get_console_logs, capture_game_view, exit_play_mode) to play through the
 game's core loop end-to-end, the way a player actually would — not just
 touching each feature in isolation. Watch for: crashes, getting stuck
 with no way to proceed, and features that worked in isolation but break
