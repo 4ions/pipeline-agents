@@ -13,6 +13,14 @@ implement it. Every task MUST have:
   increases by at least 1 unit within 1 second of the jump input", not
   "jumping feels good")
 - needsArt: true if the task needs a placeholder visual asset
+- description: MUST explicitly name the target Unity scene this task
+  works in (not just the first task's description) — e.g. "In the
+  LockAndKeyDemo scene, add a player GameObject with...". Programmer,
+  Artist, and Tester agents each run as fresh subagents per task with no
+  memory of earlier tasks, and Unity MCP commands operate on whichever
+  scene happens to be open in the Editor — if a task's description
+  doesn't name the scene, an agent can end up editing the wrong scene
+  (including an existing, unrelated scene) without realizing it.
 
 Only use specializations the game actually needs — a small prototype
 probably only needs gameplay and ui; don't add ai/network/graphics/tools

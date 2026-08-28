@@ -159,6 +159,14 @@ implement it. Every task MUST have:
   increases by at least 1 unit within 1 second of the jump input", not
   "jumping feels good")
 - needsArt: true if the task needs a placeholder visual asset
+- description: MUST explicitly name the target Unity scene this task
+  works in (not just the first task's description) — e.g. "In the
+  LockAndKeyDemo scene, add a player GameObject with...". Programmer,
+  Artist, and Tester agents each run as fresh subagents per task with no
+  memory of earlier tasks, and Unity MCP commands operate on whichever
+  scene happens to be open in the Editor — if a task's description
+  doesn't name the scene, an agent can end up editing the wrong scene
+  (including an existing, unrelated scene) without realizing it.
 
 Only use specializations the game actually needs — a small prototype
 probably only needs gameplay and ui; don't add ai/network/graphics/tools
@@ -196,9 +204,23 @@ Task: ${task.description}
 Success criterion (what the Tester will check): ${task.successCriterion}
 ${retryContext}
 
+CRITICAL — verify the scene before touching anything: Unity MCP
+scene-editing commands operate on whichever scene is currently open/active
+in the Editor, NOT on a scene name you merely have in mind. Before
+creating or modifying any GameObject or component, confirm which scene is
+currently open (use your Unity MCP tools to check), and if this task's
+description names a specific scene, open that exact scene first if it
+isn't already the active one. If the task doesn't name a scene, check
+${targetProjectPath}/.pipeline/gdd.md for the scene this build is working
+in before making any change. Never assume the Editor's current active
+scene is the correct one — operating on the wrong scene means editing
+content this task was never meant to touch, which is a serious error, not
+a minor slip.
+
 Use the Unity MCP tools available to you (search for them if you don't
 see them yet) to write/edit C# scripts and configure the scene/GameObjects
-needed. Keep the change scoped to this task. When done, append a line to
+needed. Keep the change scoped to this task and to the confirmed correct
+scene. When done, append a line to
 ${targetProjectPath}/.pipeline/activity.log.jsonl: {"ts": "<ISO timestamp
 from shell 'date -u +%Y-%m-%dT%H:%M:%SZ'>", "role": "${role}",
 "specialization": "${task.specialization}", "taskId": "${task.id}",
@@ -217,6 +239,16 @@ prefab — whatever fits) wired into what the Programmer built for it. Use
 the Unity MCP tools available to you. Keep it simple placeholder-quality;
 visual polish is not the goal here.
 
+CRITICAL — verify the scene before touching anything: Unity MCP commands
+operate on whichever scene is currently open/active in the Editor. Before
+assigning a material or wiring an asset to a GameObject, confirm which
+scene is currently open, and if this task's description names a specific
+scene, open that exact scene first if it isn't already active. If the
+task doesn't name a scene, check ${targetProjectPath}/.pipeline/gdd.md for
+the scene this build is working in. Never assume the current active scene
+is correct — wire assets only onto GameObjects in the confirmed right
+scene.
+
 Append a "start" line and, when done, a "done" line to
 ${targetProjectPath}/.pipeline/activity.log.jsonl: {"ts": "<ISO
 timestamp from shell 'date -u +%Y-%m-%dT%H:%M:%SZ'>", "role": "artist",
@@ -232,6 +264,14 @@ function scenarioTestPrompt(task, attempt, targetProjectPath) {
 Task under test: ${task.description}
 Success criterion: ${task.successCriterion}
 This is check attempt ${attempt} for this task.
+
+CRITICAL — verify the scene before testing: Unity Play Mode and MCP
+commands operate on whichever scene is currently open/active in the
+Editor. Before entering Play Mode, confirm which scene is currently open,
+and if this task's description names a specific scene, open that exact
+scene first if it isn't already active. If the task doesn't name a scene,
+check ${targetProjectPath}/.pipeline/gdd.md for the scene this build is
+working in. Testing the wrong scene produces a meaningless result.
 
 Use the play-mode/input MCP tools available to you (search for them if
 you don't see them yet — look for Play Mode control, simulated

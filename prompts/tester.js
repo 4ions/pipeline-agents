@@ -5,6 +5,14 @@ Task under test: ${task.description}
 Success criterion: ${task.successCriterion}
 This is check attempt ${attempt} for this task.
 
+CRITICAL — verify the scene before testing: Unity Play Mode and MCP
+commands operate on whichever scene is currently open/active in the
+Editor. Before entering Play Mode, confirm which scene is currently open,
+and if this task's description names a specific scene, open that exact
+scene first if it isn't already active. If the task doesn't name a scene,
+check ${targetProjectPath}/.pipeline/gdd.md for the scene this build is
+working in. Testing the wrong scene produces a meaningless result.
+
 Use the play-mode/input MCP tools available to you (search for them if
 you don't see them yet — look for Play Mode control, simulated
 input/key-press, and screenshot capture tools) to actually operate the

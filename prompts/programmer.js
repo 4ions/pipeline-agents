@@ -18,9 +18,23 @@ Task: ${task.description}
 Success criterion (what the Tester will check): ${task.successCriterion}
 ${retryContext}
 
+CRITICAL — verify the scene before touching anything: Unity MCP
+scene-editing commands operate on whichever scene is currently open/active
+in the Editor, NOT on a scene name you merely have in mind. Before
+creating or modifying any GameObject or component, confirm which scene is
+currently open (use your Unity MCP tools to check), and if this task's
+description names a specific scene, open that exact scene first if it
+isn't already the active one. If the task doesn't name a scene, check
+${targetProjectPath}/.pipeline/gdd.md for the scene this build is working
+in before making any change. Never assume the Editor's current active
+scene is the correct one — operating on the wrong scene means editing
+content this task was never meant to touch, which is a serious error, not
+a minor slip.
+
 Use the Unity MCP tools available to you (search for them if you don't
 see them yet) to write/edit C# scripts and configure the scene/GameObjects
-needed. Keep the change scoped to this task. When done, append a line to
+needed. Keep the change scoped to this task and to the confirmed correct
+scene. When done, append a line to
 ${targetProjectPath}/.pipeline/activity.log.jsonl: {"ts": "<ISO timestamp
 from shell 'date -u +%Y-%m-%dT%H:%M:%SZ'>", "role": "${role}",
 "specialization": "${task.specialization}", "taskId": "${task.id}",
