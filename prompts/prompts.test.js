@@ -7,6 +7,7 @@ import { implementPrompt, animationReviewPrompt } from './programmer.js'
 import { artPrompt, animatedArtPrompt } from './artist.js'
 import { scenarioTestPrompt, fullPlaytestPrompt } from './tester.js'
 import { qualityCritiquePrompt } from './critic.js'
+import { roadmapPrompt, roadmapReviewPrompt } from './roadmap.js'
 
 const FIXTURE_VISION = { identity: 'A test game', scope: 'test scope', priorities: ['fun', 'polish'] }
 const FIXTURE_TASK = { id: 'task-001', specialization: 'gameplay', description: 'Player can jump', successCriterion: 'Jump works', needsArt: false, needsAnimation: false, status: 'todo', attempts: 0 }
@@ -158,4 +159,25 @@ test('qualityCritiquePrompt includes the GDD and forbids calling issues minor', 
   assert.ok(result.includes('a short GDD'))
   assert.ok(result.includes('FORBIDDEN'))
   assert.ok(result.includes(FIXTURE_TARGET_PATH))
+})
+
+test('roadmapPrompt includes the source document and target path', () => {
+  const doc = 'A cozy farming sim with seasons, NPC relationships, and a mine.'
+  const result = roadmapPrompt(doc, FIXTURE_TARGET_PATH)
+  assert.equal(typeof result, 'string')
+  assert.ok(result.includes(doc))
+  assert.ok(result.includes(FIXTURE_TARGET_PATH))
+  assert.ok(result.includes('project-map.md'))
+})
+
+test('roadmapReviewPrompt includes the remaining roadmap and the milestone result, and explains the verdict options', () => {
+  const roadmap = { milestones: [{ id: 'M2', description: 'NPC schedules', scope: 'basic daily NPC movement', dependsOn: ['M1'] }] }
+  const milestoneResult = { milestone: { id: 'M1', description: 'Day/night cycle' }, finalReview: { ready: true, summary: 'Day/night cycle works end to end.' } }
+  const result = roadmapReviewPrompt(roadmap, milestoneResult, FIXTURE_TARGET_PATH)
+  assert.equal(typeof result, 'string')
+  assert.ok(result.includes('M2'))
+  assert.ok(result.includes('Day/night cycle works end to end.'))
+  assert.ok(result.includes('escalate'))
+  assert.ok(result.includes('complete'))
+  assert.ok(result.includes('project-map.md'))
 })
