@@ -31,6 +31,15 @@ const MAX_POLISH_ROUNDS = 5
 // cap, alongside the Director's own escalate/complete verdict from
 // roadmapReviewPrompt, is what actually bounds an unattended run.
 const MAX_MILESTONES = 5
+// Bounded rounds for a SINGLE milestone's own reopen loop (playtest ->
+// quality gate -> final review -> if not ready, re-implement whatever the
+// Director reopened -> repeat), same pattern as fix-reopened.body.js's
+// outer loop — just nested one level deeper, inside the milestone chain,
+// so a milestone gets a real chance to fix itself before the whole chain
+// gives up on it. Smaller than fix-reopened's own MAX_REOPEN_ROUNDS since
+// each round here is already nested inside a 5-milestone cap and cost
+// compounds quickly.
+const MAX_MILESTONE_REOPEN_ROUNDS = 2
 
 async function animateTask(task, targetProjectPath, vision) {
   let feedback = null
@@ -184,89 +193,119 @@ now, only what THIS MILESTONE ONLY says above: ${vision.scope}`,
   const combinedGdd = allGddsSoFar.map(g => `## Milestone ${g.id}\n${g.gdd}`).join('\n\n')
 
   phase('Implementation')
-  const taskResults = await pipeline(
+  let currentTaskResults = await pipeline(
     design.tasks,
     (task) => implementAndTestTask(task, args.targetProjectPath, vision)
   )
-  const blocked = taskResults.filter(r => r && r.status === 'blocked')
 
-  // Everything built so far, THIS milestone's fresh results included —
-  // this is what Full Playtest/Quality Gate/Report evaluate below, so
-  // they see the whole accumulated project, not just this milestone.
-  const allTaskResultsSoFar = [...accumulatedTaskResults, ...taskResults]
+  let playtestResult = null
+  let critique = null
+  let finalReview = null
 
-  phase('Full Playtest')
-  const completedTasks = allTaskResultsSoFar.filter(r => r && r.status === 'done').map(r => r.task)
-  const playtestResult = await agent(fullPlaytestPrompt(vision, { tasks: completedTasks }, args.targetProjectPath), {
-    schema: PLAYTEST_SCHEMA,
-    phase: 'Full Playtest',
-    label: `playtest:${milestone.id}:1`,
-  })
-  if (!playtestResult) {
-    log('Full playtest agent failed to return a result — the final review will note this as unverified.')
-  }
+  for (let reopenRound = 0; reopenRound <= MAX_MILESTONE_REOPEN_ROUNDS; reopenRound++) {
+    // Everything built so far, THIS milestone's current results included —
+    // this is what Full Playtest/Quality Gate/Report evaluate below, so
+    // they see the whole accumulated project, not just this milestone.
+    const allTaskResultsSoFar = [...accumulatedTaskResults, ...currentTaskResults]
 
-  phase('Quality Gate')
-  let critique = await agent(
-    qualityCritiquePrompt(vision, combinedGdd, allTaskResultsSoFar, playtestResult, args.targetProjectPath),
-    { phase: 'Quality Gate', label: `critique:${milestone.id}:1`, schema: QUALITY_CRITIQUE_SCHEMA }
-  )
-  for (let round = 1; round <= MAX_POLISH_ROUNDS && critique && !critique.acceptable; round++) {
-    const blockingIssues = critique.issues.filter(i => i.severity === 'blocking')
-    if (blockingIssues.length === 0) break
-    const taskIdsToFix = [...new Set(blockingIssues.map(i => i.taskId).filter(Boolean))]
-    if (taskIdsToFix.length === 0) break
-
-    log(`Milestone ${milestone.id} Quality Critic round ${round}: ${blockingIssues.length} blocking issue(s) on tasks ${taskIdsToFix.join(', ')}`)
-    for (const taskId of taskIdsToFix) {
-      const result = allTaskResultsSoFar.find(r => r && r.task.id === taskId)
-      if (!result) continue
-      const critiqueFailure = {
-        evidence: blockingIssues.filter(i => i.taskId === taskId).map(i => i.description).join('; '),
-        bug: null,
-      }
-      await agent(implementPrompt(result.task, round, critiqueFailure, args.targetProjectPath, vision), {
-        phase: 'Quality Gate',
-        label: `critic-fix:${milestone.id}:${taskId}:${round}`,
-      })
+    phase('Full Playtest')
+    const completedTasks = allTaskResultsSoFar.filter(r => r && r.status === 'done').map(r => r.task)
+    playtestResult = await agent(fullPlaytestPrompt(vision, { tasks: completedTasks }, args.targetProjectPath), {
+      schema: PLAYTEST_SCHEMA,
+      phase: 'Full Playtest',
+      label: `playtest:${milestone.id}:${reopenRound + 1}`,
+    })
+    if (!playtestResult) {
+      log('Full playtest agent failed to return a result — the final review will note this as unverified.')
     }
 
+    phase('Quality Gate')
     critique = await agent(
       qualityCritiquePrompt(vision, combinedGdd, allTaskResultsSoFar, playtestResult, args.targetProjectPath),
-      { phase: 'Quality Gate', label: `critique:${milestone.id}:${round + 1}`, schema: QUALITY_CRITIQUE_SCHEMA }
+      { phase: 'Quality Gate', label: `critique:${milestone.id}:${reopenRound}:1`, schema: QUALITY_CRITIQUE_SCHEMA }
     )
-  }
-  if (!critique) {
-    log('Quality Critic failed to return a result — the final review will note quality as unverified.')
-  }
+    for (let round = 1; round <= MAX_POLISH_ROUNDS && critique && !critique.acceptable; round++) {
+      const blockingIssues = critique.issues.filter(i => i.severity === 'blocking')
+      if (blockingIssues.length === 0) break
+      const taskIdsToFix = [...new Set(blockingIssues.map(i => i.taskId).filter(Boolean))]
+      if (taskIdsToFix.length === 0) break
 
-  phase('Report')
-  const directorContext = blocked.length > 0
-    ? {
-        note: 'No escalation/decision phase exists in this milestone-build workflow yet — these tasks are simply unresolved, not deliberately descoped or simplified.',
-        blockedTasks: blocked.map(b => ({ id: b.task.id, description: b.task.description, attempts: b.attempts })),
+      log(`Milestone ${milestone.id} reopen-round ${reopenRound} Quality Critic round ${round}: ${blockingIssues.length} blocking issue(s) on tasks ${taskIdsToFix.join(', ')}`)
+      for (const taskId of taskIdsToFix) {
+        const result = allTaskResultsSoFar.find(r => r && r.task.id === taskId)
+        if (!result) continue
+        const critiqueFailure = {
+          evidence: blockingIssues.filter(i => i.taskId === taskId).map(i => i.description).join('; '),
+          bug: null,
+        }
+        await agent(implementPrompt(result.task, round, critiqueFailure, args.targetProjectPath, vision), {
+          phase: 'Quality Gate',
+          label: `critic-fix:${milestone.id}:${reopenRound}:${taskId}:${round}`,
+        })
       }
-    : null
-  const finalReview = await agent(
-    finalReviewPrompt(vision, combinedGdd, allTaskResultsSoFar, playtestResult, directorContext, critique, args.targetProjectPath),
-    {
-      phase: 'Report',
-      label: `final-review:${milestone.id}`,
-      schema: { type: 'object', required: ['ready', 'reopenTaskIds', 'summary'], properties: {
-        ready: { type: 'boolean' }, reopenTaskIds: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' },
-      } },
-    }
-  )
 
-  // Only THIS milestone's own tasks feed the accumulator — allTaskResultsSoFar
-  // above already folded in every prior milestone's results, so adding
-  // that instead here would double-count them on the next iteration.
-  accumulatedTaskResults.push(...taskResults)
+      critique = await agent(
+        qualityCritiquePrompt(vision, combinedGdd, allTaskResultsSoFar, playtestResult, args.targetProjectPath),
+        { phase: 'Quality Gate', label: `critique:${milestone.id}:${reopenRound}:${round + 1}`, schema: QUALITY_CRITIQUE_SCHEMA }
+      )
+    }
+    if (!critique) {
+      log('Quality Critic failed to return a result — the final review will note quality as unverified.')
+    }
+
+    phase('Report')
+    const blocked = currentTaskResults.filter(r => r && r.status === 'blocked')
+    const directorContext = blocked.length > 0
+      ? {
+          note: 'No escalation/decision phase exists in this milestone-build workflow yet — these tasks are simply unresolved, not deliberately descoped or simplified.',
+          blockedTasks: blocked.map(b => ({ id: b.task.id, description: b.task.description, attempts: b.attempts })),
+        }
+      : null
+    finalReview = await agent(
+      finalReviewPrompt(vision, combinedGdd, allTaskResultsSoFar, playtestResult, directorContext, critique, args.targetProjectPath),
+      {
+        phase: 'Report',
+        label: `final-review:${milestone.id}:${reopenRound + 1}`,
+        schema: { type: 'object', required: ['ready', 'reopenTaskIds', 'summary'], properties: {
+          ready: { type: 'boolean' }, reopenTaskIds: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' },
+        } },
+      }
+    )
+
+    if (!finalReview || finalReview.ready || !Array.isArray(finalReview.reopenTaskIds) || finalReview.reopenTaskIds.length === 0) {
+      break
+    }
+    if (reopenRound === MAX_MILESTONE_REOPEN_ROUNDS) {
+      log(`Milestone ${milestone.id}: still not ready after ${MAX_MILESTONE_REOPEN_ROUNDS} reopen rounds — moving on to the milestone-level stop check below rather than looping forever.`)
+      break
+    }
+    log(`Milestone ${milestone.id} reopen round ${reopenRound + 1}: reopening ${finalReview.reopenTaskIds.join(', ')} — ${finalReview.summary}`)
+
+    phase('Implementation')
+    const reopenIds = new Set(finalReview.reopenTaskIds)
+    const tasksToReopen = currentTaskResults
+      .filter(r => r && reopenIds.has(r.task.id))
+      .map(r => ({ ...r.task, status: 'todo', attempts: 0 }))
+    const freshResults = await pipeline(
+      tasksToReopen,
+      (task) => implementAndTestTask(task, args.targetProjectPath, vision)
+    )
+    const freshById = new Map(freshResults.map(r => [r.task.id, r]))
+    currentTaskResults = currentTaskResults.map(r => freshById.get(r.task.id) ?? r)
+  }
+
+  const blocked = currentTaskResults.filter(r => r && r.status === 'blocked')
+
+  // Only THIS milestone's own (post-reopen-loop) tasks feed the
+  // accumulator — the per-round allTaskResultsSoFar above already folded
+  // in every prior milestone's results, so adding that instead here would
+  // double-count them on the next milestone's iteration.
+  accumulatedTaskResults.push(...currentTaskResults)
   accumulatedGdds.push({ id: milestone.id, gdd: design.gdd })
 
   const milestoneResult = {
     milestone,
-    taskResults,
+    taskResults: currentTaskResults,
     blocked: blocked.map(b => b.task.id),
     playtestResult,
     qualityCritique: critique,

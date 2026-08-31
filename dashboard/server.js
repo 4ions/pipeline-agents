@@ -26,7 +26,16 @@ export function createServer(pipelineParentDir, publicDir = DEFAULT_PUBLIC_DIR) 
       } catch {
         // no backlog yet (still in Vision/Design), or a Tester is mid-write — leave null
       }
-      const body = JSON.stringify({ ...reduceToState(events), backlog })
+      let milestoneStatus = null
+      try {
+        const text = await readFile(path.join(pipelineParentDir, '.pipeline', 'milestone-status.json'), 'utf8')
+        milestoneStatus = JSON.parse(text)
+      } catch {
+        // not a milestone-build run (or an older run from before this file
+        // existed) — leave null, the client falls back to deriving a
+        // rough milestone label from backlog task id prefixes instead
+      }
+      const body = JSON.stringify({ ...reduceToState(events), backlog, milestoneStatus })
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(body)
       return

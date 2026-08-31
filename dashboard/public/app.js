@@ -129,6 +129,54 @@ function renderNowBanner(timeline) {
   nowText.append(roleSpan, rest, ago)
 }
 
+const MILESTONE_STATUS_ICON = { done: '✅', current: '⏳', pending: '⭕', escalated: '🚨' }
+
+// milestone-status.json only exists for milestone-build runs (written by
+// roadmapPrompt/roadmapReviewPrompt). Older/other runs — or a
+// milestone-build run whose prompts predate this file — have none. Fall
+// back to deriving a rough single-milestone label from the current
+// backlog's task id prefix (tasks are required to be named "<milestoneId>-T1"
+// etc, specifically to avoid cross-milestone id collisions) so there's
+// still SOME visibility instead of the panel just staying hidden.
+function deriveMilestoneFallback(backlog) {
+  if (!backlog || !Array.isArray(backlog) || backlog.length === 0) return null
+  const match = /^([A-Za-z0-9]+)-/.exec(backlog[0].id)
+  if (!match) return null
+  const id = match[1]
+  return {
+    chainStatus: 'in_progress',
+    currentMilestoneId: id,
+    milestones: [{ id, description: '(derived from task id prefixes — this run predates milestone-status.json)', status: 'current' }],
+  }
+}
+
+function renderMilestones(milestoneStatus, backlog) {
+  const section = document.getElementById('campaign-map')
+  const summaryEl = document.getElementById('campaign-summary')
+  const listEl = document.getElementById('milestone-list')
+  const status = milestoneStatus ?? deriveMilestoneFallback(backlog)
+  if (!status || !Array.isArray(status.milestones) || status.milestones.length === 0) {
+    section.hidden = true
+    return
+  }
+  section.hidden = false
+  const doneCount = status.milestones.filter(m => m.status === 'done').length
+  summaryEl.textContent = `${doneCount}/${status.milestones.length} done · ${status.chainStatus}`
+
+  listEl.innerHTML = ''
+  for (const m of status.milestones) {
+    const li = document.createElement('li')
+    li.className = `milestone-chip status-${m.status}`
+    const idSpan = document.createElement('span')
+    idSpan.className = 'milestone-id'
+    idSpan.textContent = `${MILESTONE_STATUS_ICON[m.status] ?? '•'} ${m.id}`
+    const descSpan = document.createElement('span')
+    descSpan.textContent = m.description
+    li.append(idSpan, descSpan)
+    listEl.appendChild(li)
+  }
+}
+
 const STATUS_ICON = { done: '✅', todo: '⭕', in_progress: '⏳', blocked: '🚨' }
 
 function renderProgress(backlog, roles) {
@@ -255,6 +303,7 @@ async function poll() {
     const state = await res.json()
     renderRoles(state.roles)
     renderProgress(state.backlog, state.roles)
+    renderMilestones(state.milestoneStatus, state.backlog)
     renderNowBanner(state.timeline)
     detectHandoffs(state.timeline)
     renderTimeline(state.timeline)

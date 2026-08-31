@@ -59,6 +59,49 @@ body {
 #now-text .now-role { color: #ffd76a; text-transform: capitalize; }
 #now-text .now-ago { opacity: 0.55; font-weight: 400; margin-left: 0.4rem; }
 
+#campaign-map { margin: 0 auto 1.2rem; max-width: 1100px; }
+#campaign-map[hidden] { display: none; }
+#campaign-map-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 0.7rem;
+  color: #ffd76a;
+  margin-bottom: 0.7rem;
+}
+#campaign-summary { color: #9fd6a4; font-size: 0.62rem; }
+
+#milestone-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  counter-reset: milestone;
+}
+.milestone-chip {
+  flex: 1 1 200px;
+  min-width: 160px;
+  padding: 0.6rem 0.8rem;
+  border-radius: 6px;
+  background: #0a0b0e;
+  box-shadow: 0 0 0 2px #ffffff1f;
+  font-size: 0.78rem;
+}
+.milestone-chip .milestone-id { font-weight: 700; margin-right: 0.3rem; }
+.milestone-chip.status-done { box-shadow: 0 0 0 2px #22c55e88; color: #86efac; }
+.milestone-chip.status-current {
+  box-shadow: 0 0 0 3px #3b82f6, 0 0 14px #3b82f6aa;
+  color: #93c5fd;
+  animation: pulse-soft 1.4s ease-in-out infinite;
+}
+.milestone-chip.status-pending { box-shadow: 0 0 0 2px #ffffff1f; color: #cbd5e1; opacity: 0.75; }
+.milestone-chip.status-escalated { box-shadow: 0 0 0 2px #ef4444aa; color: #fca5a5; }
+
 #quest-board { margin: 0 auto 1.6rem; max-width: 1100px; }
 #quest-board-head {
   display: flex;

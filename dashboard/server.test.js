@@ -22,7 +22,27 @@ test('GET /api/state returns empty state when no activity log exists yet', async
     const res = await fetch(`${base}/api/state`)
     assert.equal(res.status, 200)
     const body = await res.json()
-    assert.deepEqual(body, { roles: {}, timeline: [], backlog: null })
+    assert.deepEqual(body, { roles: {}, timeline: [], backlog: null, milestoneStatus: null })
+  })
+})
+
+test('GET /api/state includes milestone-status.json contents when present', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'agb-dash-'))
+  await mkdir(path.join(dir, '.pipeline'), { recursive: true })
+  const milestoneStatus = {
+    chainStatus: 'in_progress',
+    currentMilestoneId: 'M2',
+    milestones: [
+      { id: 'M1', description: 'Farming core loop', status: 'done' },
+      { id: 'M2', description: 'Day/night cycle', status: 'current' },
+      { id: 'M3', description: 'Shopkeeper NPC', status: 'pending' },
+    ],
+  }
+  await writeFile(path.join(dir, '.pipeline', 'milestone-status.json'), JSON.stringify(milestoneStatus))
+  await withServer(dir, async (base) => {
+    const res = await fetch(`${base}/api/state`)
+    const body = await res.json()
+    assert.deepEqual(body.milestoneStatus, milestoneStatus)
   })
 })
 

@@ -41,6 +41,17 @@ ${targetProjectPath}/.pipeline/project-map.md with a short header noting
 no scenes exist yet — later milestones will update it with the as-built
 scene topology as they go.
 
+CRITICAL — also write ${targetProjectPath}/.pipeline/milestone-status.json
+(using your Write tool) — this is what the live progress dashboard reads
+to show which milestone is active, since the regular backlog.json only
+ever shows the CURRENT milestone's tasks and has no memory of earlier
+ones. Its shape: {"chainStatus": "in_progress", "currentMilestoneId":
+"<id of milestones[0]>", "milestones": [{"id": "...", "description":
+"...", "status": "current"}, {"id": "...", "description": "...",
+"status": "pending"}, ...]} — the FIRST milestone in your ordered list
+gets status "current", every other one gets "pending". Without this file
+the dashboard has no way to show milestone progress at all.
+
 Append a "start" line and, when done, a "done" line to
 ${targetProjectPath}/.pipeline/activity.log.jsonl: {"ts": "<ISO timestamp
 from shell 'date -u +%Y-%m-%dT%H:%M:%SZ'>", "role": "director",
@@ -97,6 +108,24 @@ roadmap above. If the plan still holds as-is, omit revisedMilestones (or
 return an empty array) and the existing remaining roadmap continues
 unchanged. Also update ${targetProjectPath}/.pipeline/roadmap.md (Write
 tool) to reflect your decision either way.
+
+CRITICAL — also update ${targetProjectPath}/.pipeline/milestone-status.json
+(read it first, then write the full updated file — same shape described
+when this file was first created: {"chainStatus": "in_progress"|
+"escalated"|"complete", "currentMilestoneId": "<id or null>",
+"milestones": [{"id","description","status"}, ...]}). Mark
+"${milestoneResult.milestone.id}" (the milestone that just finished) as
+"status": "done" — keep every already-"done" entry from the existing
+file as "done", don't lose history. If your verdict is "continue": set
+chainStatus "in_progress", mark the first milestone of your remaining
+plan (the revised one if you changed it, otherwise the existing remaining
+list) as "current", every other remaining one as "pending", and include
+any newly-added milestones too. If "escalate": set chainStatus
+"escalated", currentMilestoneId null. If "complete": set chainStatus
+"complete", currentMilestoneId null, and mark every still-listed
+milestone "pending" (they were never built). This file is what the live
+dashboard reads for milestone progress — keep it accurate every time you
+run.
 
 Append a "start" line before you begin and a "done" line when you finish
 to ${targetProjectPath}/.pipeline/activity.log.jsonl: {"ts": "<ISO
