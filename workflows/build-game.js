@@ -103,6 +103,11 @@ const QUALITY_CRITIQUE_SCHEMA = {
           taskId: { type: ['string', 'null'], description: 'The backlog task id this issue is closest to, or null for a whole-game issue' },
           description: { type: 'string', description: 'Specific enough to act on, not a vague generality' },
           severity: { type: 'string', enum: ['blocking', 'polish'] },
+          relatedTaskIds: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Only present when this issue is CROSS-CUTTING — the same underlying concept/state is duplicated or inconsistent across more than one task\'s own code (e.g. two scripts each independently computing world bounds). List every OTHER task id (besides taskId) whose code is part of the same root cause, so they get fixed together, not as isolated patches. Omit for an issue confined to one task.',
+          },
         },
       },
     },
@@ -145,6 +150,45 @@ const PLAYTEST_SCHEMA = {
   properties: {
     completed: { type: 'boolean', description: 'Whether the full playthrough reached its end without breaking' },
     issues: { type: 'array', items: { type: 'string' }, description: 'Any problems found during the full playthrough, empty if none' },
+  },
+}
+
+const MILESTONE_SNAPSHOT_SCHEMA = {
+  type: 'object',
+  required: ['id', 'gdd', 'tasks'],
+  properties: {
+    id: { type: 'string', description: 'The milestone id this snapshot belongs to, e.g. "M1"' },
+    gdd: { type: 'string', description: 'This milestone\'s own GDD text, as last written' },
+    tasks: { type: 'array', items: BACKLOG_SCHEMA.properties.tasks.items, description: 'This milestone\'s own task list, each with its final status/attempts' },
+  },
+}
+
+const RESUME_STATE_SCHEMA = {
+  type: 'object',
+  required: ['mode'],
+  properties: {
+    mode: {
+      type: 'string',
+      enum: ['fresh', 'resume', 'escalated'],
+      description: '"fresh" = no prior state, run the normal roadmap-from-scratch path. "resume" = prior state found, pick the chain back up. "escalated" = the chain is waiting on a human decision, do not touch anything.',
+    },
+    escalationReason: { type: 'string', description: 'Only present when mode is "escalated" — why the chain needs a human decision' },
+    vision: { ...VISION_SCHEMA, description: 'Only present when mode is "resume" — the vision loaded from vision.md' },
+    remainingMilestones: {
+      type: 'array',
+      items: MILESTONE_SCHEMA,
+      description: 'Only present when mode is "resume" — every not-yet-done milestone, in roadmap order, the "current" one (if any) first',
+    },
+    doneMilestones: {
+      type: 'array',
+      items: MILESTONE_SNAPSHOT_SCHEMA,
+      description: 'Only present when mode is "resume" — one entry per milestone already marked "done", loaded from its persisted snapshot',
+    },
+    currentMilestoneSnapshot: {
+      type: ['object', 'null'],
+      properties: MILESTONE_SNAPSHOT_SCHEMA.properties,
+      description: 'Only present when mode is "resume". The "current" milestone\'s own snapshot if one is usable, otherwise null (meaning: treat it as not-yet-started and design it fresh)',
+    },
   },
 }
 
@@ -379,6 +423,22 @@ implement it. Every task MUST have:
   whole time it was chasing, with no visible difference until it actually
   landed a hit — don't repeat it.
 
+HARD RULE — shared state gets ONE owner, everyone else reads it: whenever
+more than one task will need the same underlying concept (world/level
+bounds, a day/night or time-of-day state, an inventory/economy model, a
+game-state flag like "is it currently night" or "is the shop open"),
+decide explicitly which ONE task creates/owns that value (as a component,
+ScriptableObject, or clearly-named static/singleton) and say so in ITS
+description, then every OTHER task that needs the same concept must say
+in its own description "read/derive this from <the owning task's
+GameObject/component>, do not compute or hardcode your own version." This
+pipeline has shipped a real bug from skipping this: a task painted a
+40x40 ground area and, in the same breath, hardcoded an unrelated 18x18
+movement boundary instead of deriving it from the ground it had just
+sized — two numbers for the same concept, invented independently, never
+reconciled. Do not let two tasks each invent their own version of the
+same fact.
+
 HARD RULE — camera follow: if the level has more than one room/screen the
 player moves between (not a single static room), one task MUST explicitly
 require a camera-follow behavior (the camera tracks the player's
@@ -411,7 +471,7 @@ Return the GDD text (in the "gdd" field, matching what you wrote to
 gdd.md) and the backlog as structured data matching the required schema.`
 }
 
-function implementPrompt(task, attempt, priorFailure, targetProjectPath, vision) {
+function implementPrompt(task, attempt, priorFailure, targetProjectPath, vision, relatedTasks) {
   // Attempt 1 has no priorFailure — it's the Programmer's first pass.
   // Attempts 2+ are retries after a failed test — logged as the Fixer,
   // per the spec's separate Fixer role, so the dashboard can show it.
@@ -422,6 +482,25 @@ function implementPrompt(task, attempt, priorFailure, targetProjectPath, vision)
 Evidence: ${priorFailure.evidence}
 ${priorFailure.bug ? `Bug: ${priorFailure.bug.description}\nRepro steps: ${priorFailure.bug.reproSteps.join(' -> ')}` : ''}
 ${attempt >= 4 ? 'This is the last attempt. Try a genuinely different implementation approach this time, not a small tweak on the same one.' : 'Fix the specific problem described above.'}`
+    : ''
+
+  const relatedTasksBlock = relatedTasks && relatedTasks.length > 0
+    ? `\n\nCRITICAL — this fix is part of a COORDINATED group, not an
+isolated patch: the Quality Critic identified that this bug's root cause
+spans more than one task's code. The other task(s) involved are:
+${relatedTasks.map(t => `- [${t.id}] ${t.description}`).join('\n')}
+Before you change anything, read the CURRENT code/scene state for all of
+them (not just your own task) — the same underlying concept (a bounds
+value, a shared game-state flag, a config number, etc.) is being computed
+or hardcoded independently in more than one place, and that's the actual
+bug. Your fix must make them converge on ONE shared representation — a
+single component, ScriptableObject, or clearly-named static/singleton
+that every involved script reads from — not another independently-tuned
+parallel calculation that will drift out of sync again the next time
+something changes. If a shared source of truth doesn't exist yet, create
+one and point every related task's code at it (even if that means
+editing a file outside this task's own original scope — that IS this
+task, for this fix).`
     : ''
 
   return `You are a SENIOR ${task.specialization} Unity programmer${role === 'fixer' ? ', currently acting as the Fixer,' : ''}
@@ -461,6 +540,7 @@ isolation): """${vision.identity}""" Priorities, in order: ${vision.priorities.j
 Task: ${task.description}
 Success criterion (what the Tester will check): ${task.successCriterion}
 ${retryContext}
+${relatedTasksBlock}
 ${task.needsAnimation ? `
 This task's GameObject already has an Animator Controller with at least
 an idle state and one action state, created and reviewed earlier — do
@@ -1149,6 +1229,21 @@ specific problems rather than matching against examples:
   This is a real quality dimension a demanding technical reviewer would
   flag even if the game plays fine — don't skip it just because nothing
   looked broken in Play Mode.
+- Shared-state root cause: when you find a bug, ask whether it's actually
+  confined to one task's own code, or whether the SAME underlying concept
+  (world/level bounds, a day/night or game-state flag, an inventory/economy
+  value, anything more than one task's script touches) is computed or
+  hardcoded independently in more than one place. A symptom that has come
+  back in a slightly different form after being "fixed" before is a strong
+  signal of this — each fix patched one side without the other, because
+  the concept was never unified into one shared source of truth. This
+  pipeline has shipped exactly this: a world-bounds value duplicated
+  across a movement script and a camera script, each independently
+  "fixed" in turn while the other quietly drifted out of sync. When you
+  find this pattern, do NOT report it as a narrow single-task issue —
+  name it as cross-cutting and list every task whose code is part of the
+  root cause (see relatedTaskIds below), so they get fixed together
+  instead of chasing the same bug through another round.
 - Vision fidelity, from a quality angle (not just literal coherence,
   which the Director separately checks): does what got built actually
   deliver the "hook" described in the vision, or does it technically
@@ -1175,7 +1270,10 @@ description (specific enough to act on — "the floor texture is stretched
 into one giant blurry tile instead of repeating," not "improve visuals"),
 and severity: "blocking" (must be fixed before this can be called done)
 or "polish" (worth fixing, but would not alone block shipping a
-prototype).
+prototype). If the issue is cross-cutting (see "Shared-state root cause"
+above), also set relatedTaskIds to every OTHER task id involved besides
+taskId — this is what lets the fix be dispatched to all of them together
+instead of one isolated patch at a time.
 
 Before you start, append a "start" line to
 ${targetProjectPath}/.pipeline/activity.log.jsonl, and after you return
@@ -1399,6 +1497,19 @@ for (let reopenRound = 0; reopenRound <= MAX_REOPEN_ROUNDS; reopenRound++) {
     const taskIdsToFix = [...new Set(blockingIssues.map(i => i.taskId).filter(Boolean))]
     if (taskIdsToFix.length === 0) break // whole-game issue with no task to reopen — nothing to re-run here
 
+    // Group tasks that share a cross-cutting root cause (relatedTaskIds) so
+    // each Fixer sees its siblings instead of patching its own task in
+    // isolation and drifting back out of sync with the others.
+    const siblingMap = new Map()
+    for (const issue of blockingIssues) {
+      if (!issue.taskId || !Array.isArray(issue.relatedTaskIds) || issue.relatedTaskIds.length === 0) continue
+      const group = new Set([issue.taskId, ...issue.relatedTaskIds])
+      for (const id of group) {
+        if (!siblingMap.has(id)) siblingMap.set(id, new Set())
+        for (const other of group) if (other !== id) siblingMap.get(id).add(other)
+      }
+    }
+
     log(`Quality Critic reopen-round ${reopenRound} polish-round ${round}: ${blockingIssues.length} blocking issue(s) on tasks ${taskIdsToFix.join(', ')}`)
     for (const taskId of taskIdsToFix) {
       const result = taskResults.find(r => r && r.task.id === taskId)
@@ -1407,7 +1518,14 @@ for (let reopenRound = 0; reopenRound <= MAX_REOPEN_ROUNDS; reopenRound++) {
         evidence: blockingIssues.filter(i => i.taskId === taskId).map(i => i.description).join('; '),
         bug: null,
       }
-      await agent(implementPrompt(result.task, round, critiqueFailure, args.targetProjectPath, vision), {
+      const siblingIds = siblingMap.get(taskId)
+      const relatedTasks = siblingIds && siblingIds.size > 0
+        ? [...siblingIds].map(id => {
+            const sibling = taskResults.find(r => r && r.task.id === id)
+            return sibling ? { id, description: sibling.task.description } : { id, description: '(unknown task)' }
+          })
+        : null
+      await agent(implementPrompt(result.task, round, critiqueFailure, args.targetProjectPath, vision, relatedTasks), {
         phase: 'Quality Gate',
         label: `critic-fix:${reopenRound}:${taskId}:${round}`,
       })

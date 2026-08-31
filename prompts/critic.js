@@ -61,6 +61,21 @@ specific problems rather than matching against examples:
   This is a real quality dimension a demanding technical reviewer would
   flag even if the game plays fine — don't skip it just because nothing
   looked broken in Play Mode.
+- Shared-state root cause: when you find a bug, ask whether it's actually
+  confined to one task's own code, or whether the SAME underlying concept
+  (world/level bounds, a day/night or game-state flag, an inventory/economy
+  value, anything more than one task's script touches) is computed or
+  hardcoded independently in more than one place. A symptom that has come
+  back in a slightly different form after being "fixed" before is a strong
+  signal of this — each fix patched one side without the other, because
+  the concept was never unified into one shared source of truth. This
+  pipeline has shipped exactly this: a world-bounds value duplicated
+  across a movement script and a camera script, each independently
+  "fixed" in turn while the other quietly drifted out of sync. When you
+  find this pattern, do NOT report it as a narrow single-task issue —
+  name it as cross-cutting and list every task whose code is part of the
+  root cause (see relatedTaskIds below), so they get fixed together
+  instead of chasing the same bug through another round.
 - Vision fidelity, from a quality angle (not just literal coherence,
   which the Director separately checks): does what got built actually
   deliver the "hook" described in the vision, or does it technically
@@ -87,7 +102,10 @@ description (specific enough to act on — "the floor texture is stretched
 into one giant blurry tile instead of repeating," not "improve visuals"),
 and severity: "blocking" (must be fixed before this can be called done)
 or "polish" (worth fixing, but would not alone block shipping a
-prototype).
+prototype). If the issue is cross-cutting (see "Shared-state root cause"
+above), also set relatedTaskIds to every OTHER task id involved besides
+taskId — this is what lets the fix be dispatched to all of them together
+instead of one isolated patch at a time.
 
 Before you start, append a "start" line to
 ${targetProjectPath}/.pipeline/activity.log.jsonl, and after you return

@@ -111,6 +111,18 @@ test('implementPrompt notes an existing Animator when the task needsAnimation', 
   assert.ok(!withoutAnimation.includes('Animator Controller with at least an idle state'))
 })
 
+test('implementPrompt includes sibling task info and a coordination instruction when relatedTasks is passed, and omits it when not', () => {
+  const relatedTasks = [{ id: 'task-999', description: 'Camera follows the player' }]
+  const withSiblings = implementPrompt(FIXTURE_TASK, 2, null, FIXTURE_TARGET_PATH, FIXTURE_VISION, relatedTasks)
+  assert.ok(withSiblings.includes('task-999'))
+  assert.ok(withSiblings.includes('Camera follows the player'))
+  assert.ok(withSiblings.includes('COORDINATED'))
+
+  const withoutSiblings = implementPrompt(FIXTURE_TASK, 2, null, FIXTURE_TARGET_PATH, FIXTURE_VISION)
+  assert.ok(!withoutSiblings.includes('COORDINATED'))
+  assert.ok(!withoutSiblings.includes('task-999'))
+})
+
 test('artPrompt includes the task id', () => {
   const result = artPrompt(FIXTURE_TASK, FIXTURE_TARGET_PATH)
   assert.equal(typeof result, 'string')

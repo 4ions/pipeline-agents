@@ -230,6 +230,20 @@ now, only what THIS MILESTONE ONLY says above: ${vision.scope}`,
       const taskIdsToFix = [...new Set(blockingIssues.map(i => i.taskId).filter(Boolean))]
       if (taskIdsToFix.length === 0) break
 
+      // Group tasks that share a cross-cutting root cause (relatedTaskIds) so
+      // each Fixer sees its siblings instead of patching its own task in
+      // isolation and drifting back out of sync with the others — siblings
+      // can span earlier milestones too, since allTaskResultsSoFar accumulates.
+      const siblingMap = new Map()
+      for (const issue of blockingIssues) {
+        if (!issue.taskId || !Array.isArray(issue.relatedTaskIds) || issue.relatedTaskIds.length === 0) continue
+        const group = new Set([issue.taskId, ...issue.relatedTaskIds])
+        for (const id of group) {
+          if (!siblingMap.has(id)) siblingMap.set(id, new Set())
+          for (const other of group) if (other !== id) siblingMap.get(id).add(other)
+        }
+      }
+
       log(`Milestone ${milestone.id} reopen-round ${reopenRound} Quality Critic round ${round}: ${blockingIssues.length} blocking issue(s) on tasks ${taskIdsToFix.join(', ')}`)
       for (const taskId of taskIdsToFix) {
         const result = allTaskResultsSoFar.find(r => r && r.task.id === taskId)
@@ -238,7 +252,14 @@ now, only what THIS MILESTONE ONLY says above: ${vision.scope}`,
           evidence: blockingIssues.filter(i => i.taskId === taskId).map(i => i.description).join('; '),
           bug: null,
         }
-        await agent(implementPrompt(result.task, round, critiqueFailure, args.targetProjectPath, vision), {
+        const siblingIds = siblingMap.get(taskId)
+        const relatedTasks = siblingIds && siblingIds.size > 0
+          ? [...siblingIds].map(id => {
+              const sibling = allTaskResultsSoFar.find(r => r && r.task.id === id)
+              return sibling ? { id, description: sibling.task.description } : { id, description: '(unknown task)' }
+            })
+          : null
+        await agent(implementPrompt(result.task, round, critiqueFailure, args.targetProjectPath, vision, relatedTasks), {
           phase: 'Quality Gate',
           label: `critic-fix:${milestone.id}:${reopenRound}:${taskId}:${round}`,
         })

@@ -59,6 +59,22 @@ implement it. Every task MUST have:
   whole time it was chasing, with no visible difference until it actually
   landed a hit — don't repeat it.
 
+HARD RULE — shared state gets ONE owner, everyone else reads it: whenever
+more than one task will need the same underlying concept (world/level
+bounds, a day/night or time-of-day state, an inventory/economy model, a
+game-state flag like "is it currently night" or "is the shop open"),
+decide explicitly which ONE task creates/owns that value (as a component,
+ScriptableObject, or clearly-named static/singleton) and say so in ITS
+description, then every OTHER task that needs the same concept must say
+in its own description "read/derive this from <the owning task's
+GameObject/component>, do not compute or hardcode your own version." This
+pipeline has shipped a real bug from skipping this: a task painted a
+40x40 ground area and, in the same breath, hardcoded an unrelated 18x18
+movement boundary instead of deriving it from the ground it had just
+sized — two numbers for the same concept, invented independently, never
+reconciled. Do not let two tasks each invent their own version of the
+same fact.
+
 HARD RULE — camera follow: if the level has more than one room/screen the
 player moves between (not a single static room), one task MUST explicitly
 require a camera-follow behavior (the camera tracks the player's

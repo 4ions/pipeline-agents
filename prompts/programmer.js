@@ -1,4 +1,4 @@
-export function implementPrompt(task, attempt, priorFailure, targetProjectPath, vision) {
+export function implementPrompt(task, attempt, priorFailure, targetProjectPath, vision, relatedTasks) {
   // Attempt 1 has no priorFailure — it's the Programmer's first pass.
   // Attempts 2+ are retries after a failed test — logged as the Fixer,
   // per the spec's separate Fixer role, so the dashboard can show it.
@@ -9,6 +9,25 @@ export function implementPrompt(task, attempt, priorFailure, targetProjectPath, 
 Evidence: ${priorFailure.evidence}
 ${priorFailure.bug ? `Bug: ${priorFailure.bug.description}\nRepro steps: ${priorFailure.bug.reproSteps.join(' -> ')}` : ''}
 ${attempt >= 4 ? 'This is the last attempt. Try a genuinely different implementation approach this time, not a small tweak on the same one.' : 'Fix the specific problem described above.'}`
+    : ''
+
+  const relatedTasksBlock = relatedTasks && relatedTasks.length > 0
+    ? `\n\nCRITICAL — this fix is part of a COORDINATED group, not an
+isolated patch: the Quality Critic identified that this bug's root cause
+spans more than one task's code. The other task(s) involved are:
+${relatedTasks.map(t => `- [${t.id}] ${t.description}`).join('\n')}
+Before you change anything, read the CURRENT code/scene state for all of
+them (not just your own task) — the same underlying concept (a bounds
+value, a shared game-state flag, a config number, etc.) is being computed
+or hardcoded independently in more than one place, and that's the actual
+bug. Your fix must make them converge on ONE shared representation — a
+single component, ScriptableObject, or clearly-named static/singleton
+that every involved script reads from — not another independently-tuned
+parallel calculation that will drift out of sync again the next time
+something changes. If a shared source of truth doesn't exist yet, create
+one and point every related task's code at it (even if that means
+editing a file outside this task's own original scope — that IS this
+task, for this fix).`
     : ''
 
   return `You are a SENIOR ${task.specialization} Unity programmer${role === 'fixer' ? ', currently acting as the Fixer,' : ''}
@@ -48,6 +67,7 @@ isolation): """${vision.identity}""" Priorities, in order: ${vision.priorities.j
 Task: ${task.description}
 Success criterion (what the Tester will check): ${task.successCriterion}
 ${retryContext}
+${relatedTasksBlock}
 ${task.needsAnimation ? `
 This task's GameObject already has an Animator Controller with at least
 an idle state and one action state, created and reviewed earlier — do
