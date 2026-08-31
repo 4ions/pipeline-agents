@@ -109,6 +109,36 @@ const QUALITY_CRITIQUE_SCHEMA = {
   },
 }
 
+const MILESTONE_SCHEMA = {
+  type: 'object',
+  required: ['id', 'description', 'scope', 'dependsOn'],
+  properties: {
+    id: { type: 'string', description: 'Short stable id, e.g. "M1" — referenced by later dependsOn arrays and by roadmapReviewPrompt' },
+    description: { type: 'string', description: 'What this milestone delivers, 1-3 sentences' },
+    scope: { type: 'string', description: 'Concrete scope for this milestone only — small enough for one Design->Implementation->Playtest->Quality-Gate cycle to actually finish' },
+    dependsOn: { type: 'array', items: { type: 'string' }, description: 'ids of earlier milestones this one requires; empty array if none' },
+  },
+}
+
+const ROADMAP_SCHEMA = {
+  type: 'object',
+  required: ['vision', 'milestones'],
+  properties: {
+    vision: VISION_SCHEMA,
+    milestones: { type: 'array', items: MILESTONE_SCHEMA, description: 'Ordered — milestones[0] is built first' },
+  },
+}
+
+const ROADMAP_REVIEW_SCHEMA = {
+  type: 'object',
+  required: ['verdict', 'reason'],
+  properties: {
+    verdict: { type: 'string', enum: ['continue', 'escalate', 'complete'] },
+    reason: { type: 'string', description: 'Why this verdict — required even for continue, so the run log explains itself' },
+    revisedMilestones: { type: 'array', items: MILESTONE_SCHEMA, description: 'Only present when verdict is continue AND the remaining roadmap changed (reordered/split/merged/trimmed/added-to); omit or leave empty to keep the remaining roadmap as-is' },
+  },
+}
+
 const PLAYTEST_SCHEMA = {
   type: 'object',
   required: ['completed', 'issues'],

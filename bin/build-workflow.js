@@ -48,15 +48,26 @@ export async function generateWorkflowScript(promptFiles, bodyFile) {
   return header + '\n' + metaStatement + '\n\n' + strippedPrompts.join('\n') + '\n' + rest
 }
 
-// CLI entrypoint: `node bin/build-workflow.js`
+// CLI entrypoint: `node bin/build-workflow.js` regenerates every named
+// workflow below from its prompt files + body file.
+const CORE_PROMPT_FILES = ['schemas.js', 'director.js', 'designer.js', 'programmer.js', 'artist.js', 'tester.js', 'critic.js']
+
+const WORKFLOWS = [
+  { name: 'build-game', promptFiles: CORE_PROMPT_FILES },
+  { name: 'fix-reopened', promptFiles: CORE_PROMPT_FILES },
+  { name: 'milestone-build', promptFiles: [...CORE_PROMPT_FILES, 'roadmap.js'] },
+]
+
 if (fileURLToPath(import.meta.url) === path.resolve(process.argv[1] ?? '')) {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-  const promptFiles = ['schemas.js', 'director.js', 'designer.js', 'programmer.js', 'artist.js', 'tester.js', 'critic.js']
-    .map(name => path.join(root, 'prompts', name))
-  const bodyFile = path.join(root, 'workflows', 'build-game.body.js')
-  const outFile = path.join(root, 'workflows', 'build-game.js')
 
-  const script = await generateWorkflowScript(promptFiles, bodyFile)
-  await writeFile(outFile, script, 'utf8')
-  console.log(`Generated ${outFile}`)
+  for (const { name, promptFiles } of WORKFLOWS) {
+    const resolvedPromptFiles = promptFiles.map(f => path.join(root, 'prompts', f))
+    const bodyFile = path.join(root, 'workflows', `${name}.body.js`)
+    const outFile = path.join(root, 'workflows', `${name}.js`)
+
+    const script = await generateWorkflowScript(resolvedPromptFiles, bodyFile)
+    await writeFile(outFile, script, 'utf8')
+    console.log(`Generated ${outFile}`)
+  }
 }
