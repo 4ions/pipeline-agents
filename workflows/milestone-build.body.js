@@ -1,0 +1,287 @@
+// workflows/milestone-build.body.js
+// NOT run directly — same generator as the other two workflows: prepend
+// prompts/schemas.js, director.js, designer.js, programmer.js, artist.js,
+// tester.js, critic.js, roadmap.js above it, write to
+// workflows/milestone-build.js. Regenerate with: node bin/build-workflow.js
+
+export const meta = {
+  name: 'milestone-build',
+  description: 'Build a large-scope game incrementally across chained, roadmap-driven milestones',
+  phases: [
+    { title: 'Roadmap' },
+    { title: 'Design' },
+    { title: 'Design Review' },
+    { title: 'Implementation' },
+    { title: 'Full Playtest' },
+    { title: 'Quality Gate' },
+    { title: 'Report' },
+    { title: 'Roadmap Review' },
+  ],
+}
+
+const MAX_FIX_ATTEMPTS = 4
+const MAX_ANIMATION_ROUNDS = 3
+const MAX_DESIGN_REVIEW_ROUNDS = 3
+const MAX_POLISH_ROUNDS = 5
+// Hard cap on chained milestones in one run. Chaining is automatic (no
+// human approval gate between milestones — see the design spec), so this
+// cap, alongside the Director's own escalate/complete verdict from
+// roadmapReviewPrompt, is what actually bounds an unattended run.
+const MAX_MILESTONES = 5
+
+async function animateTask(task, targetProjectPath, vision) {
+  let feedback = null
+  for (let round = 1; round <= MAX_ANIMATION_ROUNDS; round++) {
+    await agent(animatedArtPrompt(task, feedback, targetProjectPath, vision), {
+      phase: 'Implementation',
+      label: `art-anim:${task.id}:${round}`,
+    })
+    const review = await agent(animationReviewPrompt(task, targetProjectPath, vision), {
+      phase: 'Implementation',
+      label: `review-anim:${task.id}:${round}`,
+      schema: ANIMATION_REVIEW_SCHEMA,
+    })
+    if (review && review.accepted) {
+      return { accepted: true, rounds: round, feedback: review.feedback }
+    }
+    feedback = review
+      ? review.feedback
+      : 'No review returned — the reviewing agent failed. Try again with a simpler, more conservative animation setup (fewer states, simpler placeholder frames).'
+  }
+  return { accepted: false, rounds: MAX_ANIMATION_ROUNDS, feedback }
+}
+
+async function implementAndTestTask(task, targetProjectPath, vision) {
+  const animationResult = task.needsAnimation ? await animateTask(task, targetProjectPath, vision) : null
+
+  let lastResult = null
+  for (let attempt = 1; attempt <= MAX_FIX_ATTEMPTS; attempt++) {
+    await agent(implementPrompt(task, attempt, lastResult, targetProjectPath, vision), {
+      phase: 'Implementation',
+      label: `impl:${task.id}:${attempt}`,
+    })
+    if (task.needsArt && !task.needsAnimation) {
+      await agent(artPrompt(task, targetProjectPath, vision), { phase: 'Implementation', label: `art:${task.id}:${attempt}` })
+    }
+    lastResult = await agent(scenarioTestPrompt(task, attempt, targetProjectPath, vision), {
+      phase: 'Implementation',
+      label: `test:${task.id}:${attempt}`,
+      schema: TEST_RESULT_SCHEMA,
+    })
+    if (lastResult && lastResult.passed) {
+      return { task, status: 'done', attempts: attempt, lastResult, animationResult }
+    }
+  }
+  return { task, status: 'blocked', attempts: MAX_FIX_ATTEMPTS, lastResult, animationResult }
+}
+
+phase('Roadmap')
+const roadmapResult = await agent(roadmapPrompt(args.sourceDocument, args.targetProjectPath), {
+  schema: ROADMAP_SCHEMA,
+  phase: 'Roadmap',
+})
+if (!roadmapResult || !Array.isArray(roadmapResult.milestones) || roadmapResult.milestones.length === 0) {
+  log('Director/Designer failed to produce a usable roadmap — aborting.')
+  return { error: 'roadmap_generation_failed' }
+}
+
+const vision = roadmapResult.vision
+let milestones = roadmapResult.milestones
+const milestoneHistory = []
+// Flat accumulator of every task result across ALL milestones built so
+// far (not just the current one) — fed into Full Playtest/Quality
+// Gate/Report below so they evaluate the WHOLE accumulated project each
+// time, per the design spec's "Regression across milestones" section.
+// Without this, a milestone's playtest/critique would only know about
+// that milestone's own tasks and couldn't specifically re-verify earlier
+// milestones' features.
+const accumulatedTaskResults = []
+
+for (let m = 0; m < MAX_MILESTONES; m++) {
+  if (milestones.length === 0) {
+    log('Roadmap has no remaining milestones — nothing left to build.')
+    break
+  }
+  const milestone = milestones[0]
+  const remainingMilestones = milestones.slice(1)
+
+  // designPrompt is reused completely unchanged (see Global Constraints)
+  // — a milestone is scoped by constructing a synthetic vision whose
+  // "scope" field narrows the Designer down to just this milestone, while
+  // "identity"/"priorities" stay the real whole-game vision so the
+  // Designer still has the right tone/priority context (see spec's
+  // gameContextBlock precedent — every per-task prompt already gets the
+  // real vision this same way).
+  const milestoneVision = {
+    identity: vision.identity,
+    scope: `THIS MILESTONE ONLY (id: ${milestone.id}): ${milestone.scope}
+
+CRITICAL — before writing any task, read ${args.targetProjectPath}/.pipeline/project-map.md
+to see what scenes/systems already exist from prior milestones, so tasks
+extend/connect to them correctly instead of guessing or duplicating. Do
+not design anything beyond this milestone's own scope, even if the wider
+game needs it eventually — that belongs to a later milestone.
+
+Full game scope, for continuity/context only — do not build any of this
+now, only what THIS MILESTONE ONLY says above: ${vision.scope}`,
+    priorities: vision.priorities,
+  }
+
+  phase('Design')
+  let design = await agent(designPrompt(milestoneVision, args.targetProjectPath), {
+    schema: BACKLOG_SCHEMA,
+    phase: 'Design',
+    label: `design:${milestone.id}:1`,
+  })
+  if (!design || !Array.isArray(design.tasks)) {
+    log(`Milestone ${milestone.id}: Designer failed to produce a backlog — stopping the chain rather than guessing.`)
+    milestoneHistory.push({ milestone, error: 'design_generation_failed' })
+    break
+  }
+
+  phase('Design Review')
+  let designReview = null
+  for (let round = 1; round <= MAX_DESIGN_REVIEW_ROUNDS; round++) {
+    designReview = await agent(designReviewPrompt(milestoneVision, design.gdd, design, args.targetProjectPath), {
+      schema: DESIGN_REVIEW_SCHEMA,
+      phase: 'Design Review',
+      label: `design-review:${milestone.id}:${round}`,
+    })
+    if (!designReview) {
+      log('Director failed to return a design review — proceeding with the unreviewed backlog.')
+      break
+    }
+    if (designReview.approved) break
+    if (round === MAX_DESIGN_REVIEW_ROUNDS) {
+      log(`Design review round ${round}: still not approved after ${MAX_DESIGN_REVIEW_ROUNDS} rounds — proceeding with the Designer's latest backlog anyway rather than blocking indefinitely.`)
+      break
+    }
+    log(`Design review round ${round}: sent back — ${designReview.feedback}`)
+    const revised = await agent(designPrompt(milestoneVision, args.targetProjectPath, designReview.feedback), {
+      schema: BACKLOG_SCHEMA,
+      phase: 'Design Review',
+      label: `design:${milestone.id}:${round + 1}`,
+    })
+    if (!revised || !Array.isArray(revised.tasks)) {
+      log('Designer failed to produce a revised backlog — proceeding with the previous version.')
+      break
+    }
+    design = revised
+  }
+
+  phase('Implementation')
+  const taskResults = await pipeline(
+    design.tasks,
+    (task) => implementAndTestTask(task, args.targetProjectPath, vision)
+  )
+  const blocked = taskResults.filter(r => r && r.status === 'blocked')
+
+  // Everything built so far, THIS milestone's fresh results included —
+  // this is what Full Playtest/Quality Gate/Report evaluate below, so
+  // they see the whole accumulated project, not just this milestone.
+  const allTaskResultsSoFar = [...accumulatedTaskResults, ...taskResults]
+
+  phase('Full Playtest')
+  const completedTasks = allTaskResultsSoFar.filter(r => r && r.status === 'done').map(r => r.task)
+  const playtestResult = await agent(fullPlaytestPrompt(vision, { tasks: completedTasks }, args.targetProjectPath), {
+    schema: PLAYTEST_SCHEMA,
+    phase: 'Full Playtest',
+    label: `playtest:${milestone.id}:1`,
+  })
+  if (!playtestResult) {
+    log('Full playtest agent failed to return a result — the final review will note this as unverified.')
+  }
+
+  phase('Quality Gate')
+  let critique = await agent(
+    qualityCritiquePrompt(vision, design.gdd, allTaskResultsSoFar, playtestResult, args.targetProjectPath),
+    { phase: 'Quality Gate', label: `critique:${milestone.id}:1`, schema: QUALITY_CRITIQUE_SCHEMA }
+  )
+  for (let round = 1; round <= MAX_POLISH_ROUNDS && critique && !critique.acceptable; round++) {
+    const blockingIssues = critique.issues.filter(i => i.severity === 'blocking')
+    if (blockingIssues.length === 0) break
+    const taskIdsToFix = [...new Set(blockingIssues.map(i => i.taskId).filter(Boolean))]
+    if (taskIdsToFix.length === 0) break
+
+    log(`Milestone ${milestone.id} Quality Critic round ${round}: ${blockingIssues.length} blocking issue(s) on tasks ${taskIdsToFix.join(', ')}`)
+    for (const taskId of taskIdsToFix) {
+      const result = allTaskResultsSoFar.find(r => r && r.task.id === taskId)
+      if (!result) continue
+      const critiqueFailure = {
+        evidence: blockingIssues.filter(i => i.taskId === taskId).map(i => i.description).join('; '),
+        bug: null,
+      }
+      await agent(implementPrompt(result.task, round, critiqueFailure, args.targetProjectPath, vision), {
+        phase: 'Quality Gate',
+        label: `critic-fix:${milestone.id}:${taskId}:${round}`,
+      })
+    }
+
+    critique = await agent(
+      qualityCritiquePrompt(vision, design.gdd, allTaskResultsSoFar, playtestResult, args.targetProjectPath),
+      { phase: 'Quality Gate', label: `critique:${milestone.id}:${round + 1}`, schema: QUALITY_CRITIQUE_SCHEMA }
+    )
+  }
+  if (!critique) {
+    log('Quality Critic failed to return a result — the final review will note quality as unverified.')
+  }
+
+  phase('Report')
+  const finalReview = await agent(
+    finalReviewPrompt(vision, design.gdd, allTaskResultsSoFar, playtestResult, null, critique, args.targetProjectPath),
+    {
+      phase: 'Report',
+      label: `final-review:${milestone.id}`,
+      schema: { type: 'object', required: ['ready', 'reopenTaskIds', 'summary'], properties: {
+        ready: { type: 'boolean' }, reopenTaskIds: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' },
+      } },
+    }
+  )
+
+  // Only THIS milestone's own tasks feed the accumulator — allTaskResultsSoFar
+  // above already folded in every prior milestone's results, so adding
+  // that instead here would double-count them on the next iteration.
+  accumulatedTaskResults.push(...taskResults)
+
+  const milestoneResult = {
+    milestone,
+    taskResults,
+    blocked: blocked.map(b => b.task.id),
+    playtestResult,
+    qualityCritique: critique,
+    finalReview,
+  }
+  milestoneHistory.push(milestoneResult)
+
+  if (!finalReview || !finalReview.ready) {
+    log(`Milestone ${milestone.id} did not pass its own final review — stopping the chain rather than building the next milestone on a broken foundation.`)
+    break
+  }
+
+  phase('Roadmap Review')
+  const review = await agent(
+    roadmapReviewPrompt({ milestones: remainingMilestones }, milestoneResult, args.targetProjectPath),
+    { schema: ROADMAP_REVIEW_SCHEMA, phase: 'Roadmap Review', label: `roadmap-review:${milestone.id}` }
+  )
+  if (!review) {
+    log('Director failed to return a roadmap review — stopping the chain rather than guessing whether to continue.')
+    break
+  }
+  if (review.verdict === 'escalate') {
+    log(`Roadmap Review: escalating to a human — ${review.reason}`)
+    break
+  }
+  if (review.verdict === 'complete') {
+    log(`Roadmap Review: roadmap complete — ${review.reason}`)
+    break
+  }
+  if (m === MAX_MILESTONES - 1) {
+    log(`Milestone cap (${MAX_MILESTONES}) reached — stopping and reporting rather than continuing unattended indefinitely.`)
+    break
+  }
+  milestones = (review.revisedMilestones && review.revisedMilestones.length > 0)
+    ? review.revisedMilestones
+    : remainingMilestones
+}
+
+return { vision, milestoneHistory }
