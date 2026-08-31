@@ -1,7 +1,7 @@
 // prompts/schemas.test.js
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { VISION_SCHEMA, BACKLOG_SCHEMA, TEST_RESULT_SCHEMA, PLAYTEST_SCHEMA, QUALITY_CRITIQUE_SCHEMA, DESIGN_REVIEW_SCHEMA } from './schemas.js'
+import { VISION_SCHEMA, BACKLOG_SCHEMA, TEST_RESULT_SCHEMA, PLAYTEST_SCHEMA, QUALITY_CRITIQUE_SCHEMA, DESIGN_REVIEW_SCHEMA, MILESTONE_SCHEMA, ROADMAP_SCHEMA, ROADMAP_REVIEW_SCHEMA } from './schemas.js'
 import { validateBacklogTask, TASK_STATUSES } from '../lib/stateSchemas.js'
 
 test('VISION_SCHEMA declares the required top-level fields', () => {
@@ -55,4 +55,21 @@ test('QUALITY_CRITIQUE_SCHEMA requires acceptable and issues, and issue severity
   const issueSchema = QUALITY_CRITIQUE_SCHEMA.properties.issues.items
   assert.deepEqual(new Set(issueSchema.required), new Set(['description', 'severity']))
   assert.deepEqual(issueSchema.properties.severity.enum, ['blocking', 'polish'])
+})
+
+test('MILESTONE_SCHEMA requires id, description, scope, and dependsOn', () => {
+  assert.deepEqual(new Set(MILESTONE_SCHEMA.required), new Set(['id', 'description', 'scope', 'dependsOn']))
+  assert.equal(MILESTONE_SCHEMA.properties.dependsOn.type, 'array')
+})
+
+test('ROADMAP_SCHEMA requires vision and milestones, and milestones items match MILESTONE_SCHEMA', () => {
+  assert.deepEqual(new Set(ROADMAP_SCHEMA.required), new Set(['vision', 'milestones']))
+  assert.equal(ROADMAP_SCHEMA.properties.milestones.items, MILESTONE_SCHEMA)
+  assert.equal(ROADMAP_SCHEMA.properties.vision, VISION_SCHEMA)
+})
+
+test('ROADMAP_REVIEW_SCHEMA requires verdict and reason, and verdict enum is continue/escalate/complete', () => {
+  assert.deepEqual(new Set(ROADMAP_REVIEW_SCHEMA.required), new Set(['verdict', 'reason']))
+  assert.deepEqual(ROADMAP_REVIEW_SCHEMA.properties.verdict.enum, ['continue', 'escalate', 'complete'])
+  assert.equal(ROADMAP_REVIEW_SCHEMA.properties.revisedMilestones.items, MILESTONE_SCHEMA)
 })
