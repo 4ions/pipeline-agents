@@ -6,6 +6,7 @@ export const meta = {
   name: 'milestone-build',
   description: 'Build a large-scope game incrementally across chained, roadmap-driven milestones',
   phases: [
+    { title: 'Resume' },
     { title: 'Roadmap' },
     { title: 'Design' },
     { title: 'Design Review' },
@@ -13,6 +14,7 @@ export const meta = {
     { title: 'Full Playtest' },
     { title: 'Quality Gate' },
     { title: 'Report' },
+    { title: 'Snapshot' },
     { title: 'Roadmap Review' },
   ],
 }
@@ -1432,6 +1434,57 @@ Return the mode and, depending on mode, the fields described above as
 structured data matching the required schema.`
 }
 
+function milestoneSnapshotPrompt(milestone, taskResults, gdd, finalReview, targetProjectPath) {
+  const taskSnapshot = taskResults.map(r => ({
+    id: r.task.id,
+    specialization: r.task.specialization,
+    description: r.task.description,
+    successCriterion: r.task.successCriterion,
+    needsArt: r.task.needsArt,
+    needsAnimation: r.task.needsAnimation,
+    status: r.status,
+    attempts: r.attempts,
+  }))
+
+  const statusUpdateBlock = (!finalReview || !finalReview.ready)
+    ? `\n\nThis milestone did NOT pass its final review this round
+(${finalReview ? `summary: ${finalReview.summary}` : 'no final review was produced at all'}).
+CRITICAL — also update ${targetProjectPath}/.pipeline/milestone-status.json:
+read it first (to preserve every OTHER milestone's existing status
+untouched — don't lose history), then write it back with chainStatus set
+to "blocked" and currentMilestoneId set to "${milestone.id}". This
+milestone's own entry in the milestones array stays "status": "current"
+(it is not done — a future resume must retry its reopen-loop, not skip
+it). This is what lets a future run of this workflow pick this milestone
+back up automatically instead of leaving the dashboard showing stale
+progress forever.`
+    : `\n\nThis milestone's final review passed. Do NOT touch
+${targetProjectPath}/.pipeline/milestone-status.json here — the Roadmap
+Review step that runs right after this one owns that update.`
+
+  return `You are recording a permanent snapshot of milestone
+"${milestone.id}" (${milestone.description}) for the Unity project at
+${targetProjectPath} — this runs after every attempt at this milestone's
+own reopen-loop, whether or not it passed, so a future run of this
+workflow can resume from here instead of re-designing this milestone
+from scratch.
+
+Write ${targetProjectPath}/.pipeline/milestones/${milestone.id}/backlog.json
+(using your Write tool — create the directory if it doesn't exist) with
+exactly this task list: ${JSON.stringify(taskSnapshot)}
+
+Write ${targetProjectPath}/.pipeline/milestones/${milestone.id}/gdd.md
+with exactly this text: """${gdd}"""
+${statusUpdateBlock}
+
+Append a "start" line before you begin and a "done" line when you finish
+to ${targetProjectPath}/.pipeline/activity.log.jsonl: {"ts": "<ISO
+timestamp from shell 'date -u +%Y-%m-%dT%H:%M:%SZ'>", "role": "director",
+"specialization": "snapshot", "taskId": null, "event": "start"|"done",
+"detail": "<short note, e.g. 'Snapshot: M1 saved, 3 tasks (ready)' or
+'Snapshot: M2 saved, 5 tasks (blocked, chain paused)'>"}.`
+}
+
 function roadmapReviewPrompt(roadmap, milestoneResult, targetProjectPath) {
   const remaining = (roadmap.milestones ?? [])
     .map(m => `- [${m.id}] (depends on: ${(m.dependsOn ?? []).length ? m.dependsOn.join(', ') : 'none'}) ${m.description}\n  scope: ${m.scope ?? '(not specified)'}`)
@@ -1579,18 +1632,45 @@ async function implementAndTestTask(task, targetProjectPath, vision) {
   return { task, status: 'blocked', attempts: MAX_FIX_ATTEMPTS, lastResult, animationResult }
 }
 
-phase('Roadmap')
-const roadmapResult = await agent(roadmapPrompt(args.sourceDocument, args.targetProjectPath), {
-  schema: ROADMAP_SCHEMA,
-  phase: 'Roadmap',
+// Every invocation checks for prior state first, using the same
+// sourceDocument/targetProjectPath args every time — there is no separate
+// "resume" flag. See docs/superpowers/specs/2026-08-31-milestone-build-resumability-design.md.
+phase('Resume')
+const resumeState = await agent(resumeStatePrompt(args.targetProjectPath), {
+  schema: RESUME_STATE_SCHEMA,
+  phase: 'Resume',
 })
-if (!roadmapResult || !Array.isArray(roadmapResult.milestones) || roadmapResult.milestones.length === 0) {
-  log('Director/Designer failed to produce a usable roadmap — aborting.')
-  return { error: 'roadmap_generation_failed' }
+if (resumeState && resumeState.mode === 'escalated') {
+  log(`Resume check: chain is escalated, needs a human decision — ${resumeState.escalationReason || '(no reason returned)'}`)
+  return { error: 'escalated', reason: resumeState.escalationReason || null }
+}
+const isResuming = !!(
+  resumeState &&
+  resumeState.mode === 'resume' &&
+  resumeState.vision &&
+  Array.isArray(resumeState.remainingMilestones) &&
+  resumeState.remainingMilestones.length > 0
+)
+
+let vision
+let milestones
+if (isResuming) {
+  vision = resumeState.vision
+  milestones = resumeState.remainingMilestones
+} else {
+  phase('Roadmap')
+  const roadmapResult = await agent(roadmapPrompt(args.sourceDocument, args.targetProjectPath), {
+    schema: ROADMAP_SCHEMA,
+    phase: 'Roadmap',
+  })
+  if (!roadmapResult || !Array.isArray(roadmapResult.milestones) || roadmapResult.milestones.length === 0) {
+    log('Director/Designer failed to produce a usable roadmap — aborting.')
+    return { error: 'roadmap_generation_failed' }
+  }
+  vision = roadmapResult.vision
+  milestones = roadmapResult.milestones
 }
 
-const vision = roadmapResult.vision
-let milestones = roadmapResult.milestones
 const milestoneHistory = []
 // Flat accumulator of every task result across ALL milestones built so
 // far (not just the current one) — fed into Full Playtest/Quality
@@ -1598,7 +1678,8 @@ const milestoneHistory = []
 // time, per the design spec's "Regression across milestones" section.
 // Without this, a milestone's playtest/critique would only know about
 // that milestone's own tasks and couldn't specifically re-verify earlier
-// milestones' features.
+// milestones' features. On a resume, seeded below from resumeState's
+// doneMilestones instead of starting empty.
 const accumulatedTaskResults = []
 // Same accumulation pattern as accumulatedTaskResults, for the same
 // reason: qualityCritiquePrompt/finalReviewPrompt need the WHOLE
@@ -1606,6 +1687,23 @@ const accumulatedTaskResults = []
 // earlier milestones' features get judged against a document that never
 // mentions them.
 const accumulatedGdds = []
+// Non-null only on a resume where the "current" milestone has a usable
+// snapshot (see resumeStatePrompt) — lets the loop below skip re-running
+// Design/Design Review for exactly that one milestone.
+const currentMilestoneSnapshot = isResuming && resumeState.currentMilestoneSnapshot ? resumeState.currentMilestoneSnapshot : null
+
+if (isResuming && Array.isArray(resumeState.doneMilestones)) {
+  for (const dm of resumeState.doneMilestones) {
+    if (!dm || !Array.isArray(dm.tasks)) continue
+    accumulatedGdds.push({ id: dm.id, gdd: dm.gdd })
+    for (const t of dm.tasks) {
+      accumulatedTaskResults.push({ task: t, status: t.status, attempts: t.attempts, lastResult: null, animationResult: null })
+    }
+  }
+  log(`Resume check: resuming — ${resumeState.doneMilestones.length} done milestone(s) loaded, ${milestones.length} remaining, ${currentMilestoneSnapshot ? `current milestone "${currentMilestoneSnapshot.id}" snapshot loaded (${currentMilestoneSnapshot.tasks.length} task(s))` : 'no usable current-milestone snapshot — it will be designed fresh'}.`)
+} else {
+  log('Resume check: fresh start.')
+}
 
 for (let m = 0; m < MAX_MILESTONES; m++) {
   if (milestones.length === 0) {
@@ -1639,46 +1737,54 @@ now, only what THIS MILESTONE ONLY says above: ${vision.scope}`,
     priorities: vision.priorities,
   }
 
-  phase('Design')
-  let design = await agent(designPrompt(milestoneVision, args.targetProjectPath), {
-    schema: BACKLOG_SCHEMA,
-    phase: 'Design',
-    label: `design:${milestone.id}:1`,
-  })
-  if (!design || !Array.isArray(design.tasks)) {
-    log(`Milestone ${milestone.id}: Designer failed to produce a backlog — stopping the chain rather than guessing.`)
-    milestoneHistory.push({ milestone, error: 'design_generation_failed' })
-    break
-  }
+  const isResumingThisMilestone = m === 0 && currentMilestoneSnapshot && currentMilestoneSnapshot.id === milestone.id
 
-  phase('Design Review')
-  let designReview = null
-  for (let round = 1; round <= MAX_DESIGN_REVIEW_ROUNDS; round++) {
-    designReview = await agent(designReviewPrompt(milestoneVision, design.gdd, design, args.targetProjectPath), {
-      schema: DESIGN_REVIEW_SCHEMA,
-      phase: 'Design Review',
-      label: `design-review:${milestone.id}:${round}`,
-    })
-    if (!designReview) {
-      log('Director failed to return a design review — proceeding with the unreviewed backlog.')
-      break
-    }
-    if (designReview.approved) break
-    if (round === MAX_DESIGN_REVIEW_ROUNDS) {
-      log(`Design review round ${round}: still not approved after ${MAX_DESIGN_REVIEW_ROUNDS} rounds — proceeding with the Designer's latest backlog anyway rather than blocking indefinitely.`)
-      break
-    }
-    log(`Design review round ${round}: sent back — ${designReview.feedback}`)
-    const revised = await agent(designPrompt(milestoneVision, args.targetProjectPath, designReview.feedback), {
+  let design
+  if (isResumingThisMilestone) {
+    design = { gdd: currentMilestoneSnapshot.gdd, tasks: currentMilestoneSnapshot.tasks }
+    log(`Milestone ${milestone.id}: resuming from its existing snapshot — skipping Design/Design Review, ${design.tasks.length} task(s) loaded.`)
+  } else {
+    phase('Design')
+    design = await agent(designPrompt(milestoneVision, args.targetProjectPath), {
       schema: BACKLOG_SCHEMA,
-      phase: 'Design Review',
-      label: `design:${milestone.id}:${round + 1}`,
+      phase: 'Design',
+      label: `design:${milestone.id}:1`,
     })
-    if (!revised || !Array.isArray(revised.tasks)) {
-      log('Designer failed to produce a revised backlog — proceeding with the previous version.')
+    if (!design || !Array.isArray(design.tasks)) {
+      log(`Milestone ${milestone.id}: Designer failed to produce a backlog — stopping the chain rather than guessing.`)
+      milestoneHistory.push({ milestone, error: 'design_generation_failed' })
       break
     }
-    design = revised
+
+    phase('Design Review')
+    let designReview = null
+    for (let round = 1; round <= MAX_DESIGN_REVIEW_ROUNDS; round++) {
+      designReview = await agent(designReviewPrompt(milestoneVision, design.gdd, design, args.targetProjectPath), {
+        schema: DESIGN_REVIEW_SCHEMA,
+        phase: 'Design Review',
+        label: `design-review:${milestone.id}:${round}`,
+      })
+      if (!designReview) {
+        log('Director failed to return a design review — proceeding with the unreviewed backlog.')
+        break
+      }
+      if (designReview.approved) break
+      if (round === MAX_DESIGN_REVIEW_ROUNDS) {
+        log(`Design review round ${round}: still not approved after ${MAX_DESIGN_REVIEW_ROUNDS} rounds — proceeding with the Designer's latest backlog anyway rather than blocking indefinitely.`)
+        break
+      }
+      log(`Design review round ${round}: sent back — ${designReview.feedback}`)
+      const revised = await agent(designPrompt(milestoneVision, args.targetProjectPath, designReview.feedback), {
+        schema: BACKLOG_SCHEMA,
+        phase: 'Design Review',
+        label: `design:${milestone.id}:${round + 1}`,
+      })
+      if (!revised || !Array.isArray(revised.tasks)) {
+        log('Designer failed to produce a revised backlog — proceeding with the previous version.')
+        break
+      }
+      design = revised
+    }
   }
 
   const allGddsSoFar = [...accumulatedGdds, { id: milestone.id, gdd: design.gdd }]
@@ -1825,6 +1931,12 @@ now, only what THIS MILESTONE ONLY says above: ${vision.scope}`,
     finalReview,
   }
   milestoneHistory.push(milestoneResult)
+
+  phase('Snapshot')
+  await agent(milestoneSnapshotPrompt(milestone, currentTaskResults, design.gdd, finalReview, args.targetProjectPath), {
+    phase: 'Snapshot',
+    label: `snapshot:${milestone.id}`,
+  })
 
   if (!finalReview || !finalReview.ready) {
     log(`Milestone ${milestone.id} did not pass its own final review — stopping the chain rather than building the next milestone on a broken foundation.`)
