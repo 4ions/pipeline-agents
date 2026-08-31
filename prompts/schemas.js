@@ -84,6 +84,11 @@ export const QUALITY_CRITIQUE_SCHEMA = {
           taskId: { type: ['string', 'null'], description: 'The backlog task id this issue is closest to, or null for a whole-game issue' },
           description: { type: 'string', description: 'Specific enough to act on, not a vague generality' },
           severity: { type: 'string', enum: ['blocking', 'polish'] },
+          relatedTaskIds: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Only present when this issue is CROSS-CUTTING — the same underlying concept/state is duplicated or inconsistent across more than one task\'s own code (e.g. two scripts each independently computing world bounds). List every OTHER task id (besides taskId) whose code is part of the same root cause, so they get fixed together, not as isolated patches. Omit for an issue confined to one task.',
+          },
         },
       },
     },

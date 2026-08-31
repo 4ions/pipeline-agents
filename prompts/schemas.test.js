@@ -1,7 +1,7 @@
 // prompts/schemas.test.js
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { VISION_SCHEMA, BACKLOG_SCHEMA, TEST_RESULT_SCHEMA, PLAYTEST_SCHEMA, QUALITY_CRITIQUE_SCHEMA, DESIGN_REVIEW_SCHEMA, MILESTONE_SCHEMA, ROADMAP_SCHEMA, ROADMAP_REVIEW_SCHEMA } from './schemas.js'
+import { VISION_SCHEMA, BACKLOG_SCHEMA, TEST_RESULT_SCHEMA, PLAYTEST_SCHEMA, QUALITY_CRITIQUE_SCHEMA, DESIGN_REVIEW_SCHEMA, MILESTONE_SCHEMA, ROADMAP_SCHEMA, ROADMAP_REVIEW_SCHEMA, MILESTONE_SNAPSHOT_SCHEMA, RESUME_STATE_SCHEMA } from './schemas.js'
 import { validateBacklogTask, TASK_STATUSES } from '../lib/stateSchemas.js'
 
 test('VISION_SCHEMA declares the required top-level fields', () => {
