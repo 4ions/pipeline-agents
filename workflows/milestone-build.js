@@ -1247,7 +1247,7 @@ matching the required schema.`
 
 function roadmapReviewPrompt(roadmap, milestoneResult, targetProjectPath) {
   const remaining = (roadmap.milestones ?? [])
-    .map(m => `- [${m.id}] (depends on: ${m.dependsOn.length ? m.dependsOn.join(', ') : 'none'}) ${m.description}\n  scope: ${m.scope}`)
+    .map(m => `- [${m.id}] (depends on: ${(m.dependsOn ?? []).length ? m.dependsOn.join(', ') : 'none'}) ${m.description}\n  scope: ${m.scope ?? '(not specified)'}`)
     .join('\n')
   return `You are a VETERAN game director reviewing progress on a
 multi-milestone Unity build at ${targetProjectPath} — the kind of
@@ -1306,6 +1306,9 @@ remaining milestones, as structured data.`
 
 
 
+// 3 same-strategy retries + 1 alternative-strategy attempt on the 4th —
+// see implementPrompt's `attempt >= 4` branch, which must stay in sync
+// with this number.
 const MAX_FIX_ATTEMPTS = 4
 const MAX_ANIMATION_ROUNDS = 3
 const MAX_DESIGN_REVIEW_ROUNDS = 3
@@ -1383,6 +1386,12 @@ const milestoneHistory = []
 // that milestone's own tasks and couldn't specifically re-verify earlier
 // milestones' features.
 const accumulatedTaskResults = []
+// Same accumulation pattern as accumulatedTaskResults, for the same
+// reason: qualityCritiquePrompt/finalReviewPrompt need the WHOLE
+// project's design context, not just the newest milestone's GDD, or
+// earlier milestones' features get judged against a document that never
+// mentions them.
+const accumulatedGdds = []
 
 for (let m = 0; m < MAX_MILESTONES; m++) {
   if (milestones.length === 0) {
@@ -1408,6 +1417,8 @@ to see what scenes/systems already exist from prior milestones, so tasks
 extend/connect to them correctly instead of guessing or duplicating. Do
 not design anything beyond this milestone's own scope, even if the wider
 game needs it eventually — that belongs to a later milestone.
+
+CRITICAL — every task id in this backlog MUST be prefixed with "${milestone.id}-" (e.g. "${milestone.id}-T1", "${milestone.id}-T2") so it can never collide with a task id from an earlier milestone — task ids are compared across the WHOLE accumulated project, not just this milestone, and a collision would cause a later fix to silently edit the wrong milestone's task.
 
 Full game scope, for continuity/context only — do not build any of this
 now, only what THIS MILESTONE ONLY says above: ${vision.scope}`,
@@ -1456,6 +1467,9 @@ now, only what THIS MILESTONE ONLY says above: ${vision.scope}`,
     design = revised
   }
 
+  const allGddsSoFar = [...accumulatedGdds, { id: milestone.id, gdd: design.gdd }]
+  const combinedGdd = allGddsSoFar.map(g => `## Milestone ${g.id}\n${g.gdd}`).join('\n\n')
+
   phase('Implementation')
   const taskResults = await pipeline(
     design.tasks,
@@ -1481,7 +1495,7 @@ now, only what THIS MILESTONE ONLY says above: ${vision.scope}`,
 
   phase('Quality Gate')
   let critique = await agent(
-    qualityCritiquePrompt(vision, design.gdd, allTaskResultsSoFar, playtestResult, args.targetProjectPath),
+    qualityCritiquePrompt(vision, combinedGdd, allTaskResultsSoFar, playtestResult, args.targetProjectPath),
     { phase: 'Quality Gate', label: `critique:${milestone.id}:1`, schema: QUALITY_CRITIQUE_SCHEMA }
   )
   for (let round = 1; round <= MAX_POLISH_ROUNDS && critique && !critique.acceptable; round++) {
@@ -1505,7 +1519,7 @@ now, only what THIS MILESTONE ONLY says above: ${vision.scope}`,
     }
 
     critique = await agent(
-      qualityCritiquePrompt(vision, design.gdd, allTaskResultsSoFar, playtestResult, args.targetProjectPath),
+      qualityCritiquePrompt(vision, combinedGdd, allTaskResultsSoFar, playtestResult, args.targetProjectPath),
       { phase: 'Quality Gate', label: `critique:${milestone.id}:${round + 1}`, schema: QUALITY_CRITIQUE_SCHEMA }
     )
   }
@@ -1514,8 +1528,14 @@ now, only what THIS MILESTONE ONLY says above: ${vision.scope}`,
   }
 
   phase('Report')
+  const directorContext = blocked.length > 0
+    ? {
+        note: 'No escalation/decision phase exists in this milestone-build workflow yet — these tasks are simply unresolved, not deliberately descoped or simplified.',
+        blockedTasks: blocked.map(b => ({ id: b.task.id, description: b.task.description, attempts: b.attempts })),
+      }
+    : null
   const finalReview = await agent(
-    finalReviewPrompt(vision, design.gdd, allTaskResultsSoFar, playtestResult, null, critique, args.targetProjectPath),
+    finalReviewPrompt(vision, combinedGdd, allTaskResultsSoFar, playtestResult, directorContext, critique, args.targetProjectPath),
     {
       phase: 'Report',
       label: `final-review:${milestone.id}`,
@@ -1529,6 +1549,7 @@ now, only what THIS MILESTONE ONLY says above: ${vision.scope}`,
   // above already folded in every prior milestone's results, so adding
   // that instead here would double-count them on the next iteration.
   accumulatedTaskResults.push(...taskResults)
+  accumulatedGdds.push({ id: milestone.id, gdd: design.gdd })
 
   const milestoneResult = {
     milestone,
@@ -1571,4 +1592,4 @@ now, only what THIS MILESTONE ONLY says above: ${vision.scope}`,
     : remainingMilestones
 }
 
-return { vision, milestoneHistory }
+return { vision, roadmap: milestones, milestoneHistory }

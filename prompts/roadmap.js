@@ -53,7 +53,7 @@ matching the required schema.`
 
 export function roadmapReviewPrompt(roadmap, milestoneResult, targetProjectPath) {
   const remaining = (roadmap.milestones ?? [])
-    .map(m => `- [${m.id}] (depends on: ${m.dependsOn.length ? m.dependsOn.join(', ') : 'none'}) ${m.description}\n  scope: ${m.scope}`)
+    .map(m => `- [${m.id}] (depends on: ${(m.dependsOn ?? []).length ? m.dependsOn.join(', ') : 'none'}) ${m.description}\n  scope: ${m.scope ?? '(not specified)'}`)
     .join('\n')
   return `You are a VETERAN game director reviewing progress on a
 multi-milestone Unity build at ${targetProjectPath} — the kind of
