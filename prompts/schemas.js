@@ -61,6 +61,35 @@ export const ANIMATION_REVIEW_SCHEMA = {
   },
 }
 
+export const DESIGN_REVIEW_SCHEMA = {
+  type: 'object',
+  required: ['approved', 'feedback'],
+  properties: {
+    approved: { type: 'boolean' },
+    feedback: { type: 'string', description: 'If approved, a short confirmation. If not, specific actionable gaps for the Designer to fix.' },
+  },
+}
+
+export const QUALITY_CRITIQUE_SCHEMA = {
+  type: 'object',
+  required: ['acceptable', 'issues'],
+  properties: {
+    acceptable: { type: 'boolean', description: 'true ONLY if genuinely nothing worth fixing was found' },
+    issues: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['description', 'severity'],
+        properties: {
+          taskId: { type: ['string', 'null'], description: 'The backlog task id this issue is closest to, or null for a whole-game issue' },
+          description: { type: 'string', description: 'Specific enough to act on, not a vague generality' },
+          severity: { type: 'string', enum: ['blocking', 'polish'] },
+        },
+      },
+    },
+  },
+}
+
 export const PLAYTEST_SCHEMA = {
   type: 'object',
   required: ['completed', 'issues'],

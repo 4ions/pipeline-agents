@@ -19,7 +19,14 @@ export function createServer(pipelineParentDir, publicDir = DEFAULT_PUBLIC_DIR) 
       } catch {
         // no log yet — return empty state
       }
-      const body = JSON.stringify(reduceToState(events))
+      let backlog = null
+      try {
+        const text = await readFile(path.join(pipelineParentDir, '.pipeline', 'backlog.json'), 'utf8')
+        backlog = JSON.parse(text)
+      } catch {
+        // no backlog yet (still in Vision/Design), or a Tester is mid-write — leave null
+      }
+      const body = JSON.stringify({ ...reduceToState(events), backlog })
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(body)
       return

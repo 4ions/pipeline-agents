@@ -3,10 +3,30 @@
 <head>
   <meta charset="utf-8" />
   <title>auto-game-build dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-  <h1>auto-game-build — live progress</h1>
+  <header id="banner">
+    <h1>🎮 auto-game-build</h1>
+    <p class="subtitle">the studio is live</p>
+  </header>
+
+  <div id="now-banner" class="pixel-panel">
+    <span class="now-icon">📍</span>
+    <span id="now-text">Starting up…</span>
+  </div>
+
+  <section id="quest-board" class="pixel-panel">
+    <div id="quest-board-head">
+      <span id="quest-title">📜 Quest Log</span>
+      <span id="progress-summary"></span>
+    </div>
+    <div id="progress-bar"><div id="progress-fill"></div></div>
+    <ul id="task-list"></ul>
+  </section>
 
   <div id="office">
     <div class="room room-director" data-role="director">
@@ -14,8 +34,9 @@
       <div class="deco deco-2">📋</div>
       <div class="floor">
         <div class="avatar-wrap">
-          <span class="nametag">Director</span>
+          <div class="speech-bubble"></div>
           <img class="avatar" src="/sprites/frames/director_idle_0.png" alt="Director" />
+          <span class="nametag">Director</span>
         </div>
       </div>
       <div class="detail"></div>
@@ -25,8 +46,9 @@
       <div class="deco deco-2">🪴</div>
       <div class="floor">
         <div class="avatar-wrap">
-          <span class="nametag">Designer</span>
+          <div class="speech-bubble"></div>
           <img class="avatar" src="/sprites/frames/designer_idle_0.png" alt="Designer" />
+          <span class="nametag">Designer</span>
         </div>
       </div>
       <div class="detail"></div>
@@ -36,8 +58,9 @@
       <div class="deco deco-2">☕</div>
       <div class="floor">
         <div class="avatar-wrap">
-          <span class="nametag">Programmer</span>
+          <div class="speech-bubble"></div>
           <img class="avatar" src="/sprites/frames/programmer_idle_0.png" alt="Programmer" />
+          <span class="nametag">Programmer</span>
         </div>
       </div>
       <div class="detail"></div>
@@ -47,8 +70,9 @@
       <div class="deco deco-2">🖼️</div>
       <div class="floor">
         <div class="avatar-wrap">
-          <span class="nametag">Artist</span>
+          <div class="speech-bubble"></div>
           <img class="avatar" src="/sprites/frames/artist_idle_0.png" alt="Artist" />
+          <span class="nametag">Artist</span>
         </div>
       </div>
       <div class="detail"></div>
@@ -58,8 +82,9 @@
       <div class="deco deco-2">🐞</div>
       <div class="floor">
         <div class="avatar-wrap">
-          <span class="nametag">Tester</span>
+          <div class="speech-bubble"></div>
           <img class="avatar" src="/sprites/frames/tester_idle_0.png" alt="Tester" />
+          <span class="nametag">Tester</span>
         </div>
       </div>
       <div class="detail"></div>
@@ -69,16 +94,19 @@
       <div class="deco deco-2">🧰</div>
       <div class="floor">
         <div class="avatar-wrap">
-          <span class="nametag">Fixer</span>
+          <div class="speech-bubble"></div>
           <img class="avatar" src="/sprites/frames/fixer_idle_0.png" alt="Fixer" />
+          <span class="nametag">Fixer</span>
         </div>
       </div>
       <div class="detail"></div>
     </div>
   </div>
 
-  <h2>Timeline</h2>
-  <ul id="timeline"></ul>
+  <section id="timeline-panel" class="pixel-panel">
+    <h2>📖 Quest Log — history</h2>
+    <ul id="timeline"></ul>
+  </section>
   <script src="/app.js" type="module"></script>
 </body>
 </html>

@@ -1,8 +1,20 @@
-export function designPrompt(vision, targetProjectPath) {
-  return `You are the Designer for a Unity game with this vision:
+export function designPrompt(vision, targetProjectPath, priorFeedback) {
+  const revisionBlock = priorFeedback
+    ? `\n\nThe Director already reviewed a previous version of this GDD/backlog
+against the vision and sent it back with this feedback — revise your GDD
+and backlog to address it specifically, don't just resubmit the same
+plan: """${priorFeedback}"""`
+    : ''
+
+  return `You are a SENIOR game designer working on a Unity game with this
+vision — someone who has shipped real games and knows that a backlog
+isn't done just because every field is technically filled in; it needs
+to actually deliver the intended feel and hold up under real play, the
+kind of judgment call a junior designer wouldn't think to make. Vision:
 Identity: """${vision.identity}"""
 Scope: ${vision.scope}
 Priorities: ${vision.priorities.join(', ')}
+${revisionBlock}
 
 CRITICAL — this pipeline builds 2D games EXCLUSIVELY, no exceptions.
 Every task's description MUST specify a 2D implementation approach:
@@ -30,6 +42,30 @@ implement it. Every task MUST have:
   object (a background wall, a HUD icon that never changes) does not need
   this. When needsAnimation is true, also set needsArt to true — animated
   objects always need art.
+  HARD RULE, EXTENDED: if the object can take damage and/or die (has or
+  will have a Health/damage component — e.g. an enemy or the player in
+  combat), idle+action is NOT enough — its description must also require
+  a hurt/damage-reaction state and a death/defeat state (or equivalent
+  visible feedback). "The enemy has no animation of anything, including
+  no death" is a real bug this pipeline has shipped before — don't repeat
+  it.
+  HARD RULE, EXTENDED: if an enemy/NPC's behavior has more than one
+  distinct phase before and during its "action" (e.g. it detects the
+  player and approaches/chases BEFORE it's actually close enough to
+  attack), a single "action" animator state covering both is not enough —
+  its description must require a distinct state for "approaching/chasing"
+  separate from "actively attacking," so the two don't look identical.
+  This pipeline has shipped an enemy that showed its attack pose the
+  whole time it was chasing, with no visible difference until it actually
+  landed a hit — don't repeat it.
+
+HARD RULE — camera follow: if the level has more than one room/screen the
+player moves between (not a single static room), one task MUST explicitly
+require a camera-follow behavior (the camera tracks the player's
+position, not fixed at the world origin) — a camera that never moves
+means the player can walk the whole level with the action permanently
+off-screen. Name this explicitly in the task description, don't leave it
+implied by "Orthographic camera."
 - description: MUST explicitly name the target Unity scene this task
   works in (not just the first task's description) — e.g. "In the
   LockAndKeyDemo scene, add a player GameObject with...". Programmer,

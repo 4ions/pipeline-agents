@@ -1,7 +1,7 @@
 // prompts/schemas.test.js
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { VISION_SCHEMA, BACKLOG_SCHEMA, TEST_RESULT_SCHEMA, PLAYTEST_SCHEMA } from './schemas.js'
+import { VISION_SCHEMA, BACKLOG_SCHEMA, TEST_RESULT_SCHEMA, PLAYTEST_SCHEMA, QUALITY_CRITIQUE_SCHEMA, DESIGN_REVIEW_SCHEMA } from './schemas.js'
 import { validateBacklogTask, TASK_STATUSES } from '../lib/stateSchemas.js'
 
 test('VISION_SCHEMA declares the required top-level fields', () => {
@@ -44,4 +44,15 @@ test('TEST_RESULT_SCHEMA requires passed and evidence', () => {
 
 test('PLAYTEST_SCHEMA requires completed and issues', () => {
   assert.deepEqual(new Set(PLAYTEST_SCHEMA.required), new Set(['completed', 'issues']))
+})
+
+test('DESIGN_REVIEW_SCHEMA requires approved and feedback', () => {
+  assert.deepEqual(new Set(DESIGN_REVIEW_SCHEMA.required), new Set(['approved', 'feedback']))
+})
+
+test('QUALITY_CRITIQUE_SCHEMA requires acceptable and issues, and issue severity is blocking/polish only', () => {
+  assert.deepEqual(new Set(QUALITY_CRITIQUE_SCHEMA.required), new Set(['acceptable', 'issues']))
+  const issueSchema = QUALITY_CRITIQUE_SCHEMA.properties.issues.items
+  assert.deepEqual(new Set(issueSchema.required), new Set(['description', 'severity']))
+  assert.deepEqual(issueSchema.properties.severity.enum, ['blocking', 'polish'])
 })
