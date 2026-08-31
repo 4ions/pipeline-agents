@@ -147,7 +147,9 @@ const accumulatedGdds = []
 // Non-null only on a resume where the "current" milestone has a usable
 // snapshot (see resumeStatePrompt) — lets the loop below skip re-running
 // Design/Design Review for exactly that one milestone.
-const currentMilestoneSnapshot = isResuming && resumeState.currentMilestoneSnapshot ? resumeState.currentMilestoneSnapshot : null
+const currentMilestoneSnapshot = isResuming && resumeState.currentMilestoneSnapshot && Array.isArray(resumeState.currentMilestoneSnapshot.tasks) && resumeState.currentMilestoneSnapshot.gdd
+  ? resumeState.currentMilestoneSnapshot
+  : null
 
 if (isResuming && Array.isArray(resumeState.doneMilestones)) {
   for (const dm of resumeState.doneMilestones) {
@@ -157,7 +159,12 @@ if (isResuming && Array.isArray(resumeState.doneMilestones)) {
       accumulatedTaskResults.push({ task: t, status: t.status, attempts: t.attempts, lastResult: null, animationResult: null })
     }
   }
-  log(`Resume check: resuming — ${resumeState.doneMilestones.length} done milestone(s) loaded, ${milestones.length} remaining, ${currentMilestoneSnapshot ? `current milestone "${currentMilestoneSnapshot.id}" snapshot loaded (${currentMilestoneSnapshot.tasks.length} task(s))` : 'no usable current-milestone snapshot — it will be designed fresh'}.`)
+}
+
+if (isResuming) {
+  log(`Resume check: resuming — ${resumeState.doneMilestones?.length ?? 0} done milestone(s) loaded, ${milestones.length} remaining, ${currentMilestoneSnapshot ? `current milestone "${currentMilestoneSnapshot.id}" snapshot loaded (${currentMilestoneSnapshot.tasks.length} task(s))` : 'no usable current-milestone snapshot — it will be designed fresh'}.`)
+} else if (resumeState && resumeState.mode === 'resume') {
+  log('Resume check: mode was "resume" but returned no usable vision/remaining milestones — falling back to a fresh roadmap instead of guessing.')
 } else {
   log('Resume check: fresh start.')
 }
