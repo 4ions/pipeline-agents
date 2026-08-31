@@ -133,3 +133,42 @@ export const PLAYTEST_SCHEMA = {
     issues: { type: 'array', items: { type: 'string' }, description: 'Any problems found during the full playthrough, empty if none' },
   },
 }
+
+export const MILESTONE_SNAPSHOT_SCHEMA = {
+  type: 'object',
+  required: ['id', 'gdd', 'tasks'],
+  properties: {
+    id: { type: 'string', description: 'The milestone id this snapshot belongs to, e.g. "M1"' },
+    gdd: { type: 'string', description: 'This milestone\'s own GDD text, as last written' },
+    tasks: { type: 'array', items: BACKLOG_SCHEMA.properties.tasks.items, description: 'This milestone\'s own task list, each with its final status/attempts' },
+  },
+}
+
+export const RESUME_STATE_SCHEMA = {
+  type: 'object',
+  required: ['mode'],
+  properties: {
+    mode: {
+      type: 'string',
+      enum: ['fresh', 'resume', 'escalated'],
+      description: '"fresh" = no prior state, run the normal roadmap-from-scratch path. "resume" = prior state found, pick the chain back up. "escalated" = the chain is waiting on a human decision, do not touch anything.',
+    },
+    escalationReason: { type: 'string', description: 'Only present when mode is "escalated" — why the chain needs a human decision' },
+    vision: { ...VISION_SCHEMA, description: 'Only present when mode is "resume" — the vision loaded from vision.md' },
+    remainingMilestones: {
+      type: 'array',
+      items: MILESTONE_SCHEMA,
+      description: 'Only present when mode is "resume" — every not-yet-done milestone, in roadmap order, the "current" one (if any) first',
+    },
+    doneMilestones: {
+      type: 'array',
+      items: MILESTONE_SNAPSHOT_SCHEMA,
+      description: 'Only present when mode is "resume" — one entry per milestone already marked "done", loaded from its persisted snapshot',
+    },
+    currentMilestoneSnapshot: {
+      type: ['object', 'null'],
+      properties: MILESTONE_SNAPSHOT_SCHEMA.properties,
+      description: 'Only present when mode is "resume". The "current" milestone\'s own snapshot if one is usable, otherwise null (meaning: treat it as not-yet-started and design it fresh)',
+    },
+  },
+}

@@ -55,6 +55,9 @@ test('QUALITY_CRITIQUE_SCHEMA requires acceptable and issues, and issue severity
   const issueSchema = QUALITY_CRITIQUE_SCHEMA.properties.issues.items
   assert.deepEqual(new Set(issueSchema.required), new Set(['description', 'severity']))
   assert.deepEqual(issueSchema.properties.severity.enum, ['blocking', 'polish'])
+  assert.equal(issueSchema.properties.relatedTaskIds.type, 'array')
+  assert.equal(issueSchema.properties.relatedTaskIds.items.type, 'string')
+  assert.ok(!issueSchema.required.includes('relatedTaskIds'), 'relatedTaskIds must be optional')
 })
 
 test('MILESTONE_SCHEMA requires id, description, scope, and dependsOn', () => {
@@ -72,4 +75,21 @@ test('ROADMAP_REVIEW_SCHEMA requires verdict and reason, and verdict enum is con
   assert.deepEqual(new Set(ROADMAP_REVIEW_SCHEMA.required), new Set(['verdict', 'reason']))
   assert.deepEqual(ROADMAP_REVIEW_SCHEMA.properties.verdict.enum, ['continue', 'escalate', 'complete'])
   assert.equal(ROADMAP_REVIEW_SCHEMA.properties.revisedMilestones.items, MILESTONE_SCHEMA)
+})
+
+test('MILESTONE_SNAPSHOT_SCHEMA requires id, gdd, and tasks, and tasks items match BACKLOG_SCHEMA task shape', () => {
+  assert.deepEqual(new Set(MILESTONE_SNAPSHOT_SCHEMA.required), new Set(['id', 'gdd', 'tasks']))
+  assert.equal(MILESTONE_SNAPSHOT_SCHEMA.properties.tasks.items, BACKLOG_SCHEMA.properties.tasks.items)
+})
+
+test('RESUME_STATE_SCHEMA requires only mode, and mode enum is fresh/resume/escalated', () => {
+  assert.deepEqual(RESUME_STATE_SCHEMA.required, ['mode'])
+  assert.deepEqual(RESUME_STATE_SCHEMA.properties.mode.enum, ['fresh', 'resume', 'escalated'])
+})
+
+test('RESUME_STATE_SCHEMA remainingMilestones/doneMilestones/currentMilestoneSnapshot reuse MILESTONE_SCHEMA/MILESTONE_SNAPSHOT_SCHEMA', () => {
+  assert.equal(RESUME_STATE_SCHEMA.properties.remainingMilestones.items, MILESTONE_SCHEMA)
+  assert.equal(RESUME_STATE_SCHEMA.properties.doneMilestones.items, MILESTONE_SNAPSHOT_SCHEMA)
+  assert.deepEqual(new Set(RESUME_STATE_SCHEMA.properties.currentMilestoneSnapshot.type), new Set(['object', 'null']))
+  assert.equal(RESUME_STATE_SCHEMA.properties.currentMilestoneSnapshot.properties, MILESTONE_SNAPSHOT_SCHEMA.properties)
 })
