@@ -7,7 +7,7 @@ import { implementPrompt, animationReviewPrompt } from './programmer.js'
 import { artPrompt, animatedArtPrompt } from './artist.js'
 import { scenarioTestPrompt, fullPlaytestPrompt } from './tester.js'
 import { qualityCritiquePrompt } from './critic.js'
-import { roadmapPrompt, roadmapReviewPrompt, resumeStatePrompt } from './roadmap.js'
+import { roadmapPrompt, roadmapReviewPrompt, resumeStatePrompt, milestoneSnapshotPrompt } from './roadmap.js'
 
 const FIXTURE_VISION = { identity: 'A test game', scope: 'test scope', priorities: ['fun', 'polish'] }
 const FIXTURE_TASK = { id: 'task-001', specialization: 'gameplay', description: 'Player can jump', successCriterion: 'Jump works', needsArt: false, needsAnimation: false, status: 'todo', attempts: 0 }
@@ -211,4 +211,31 @@ test('resumeStatePrompt explains the per-milestone snapshot path and the top-lev
   assert.ok(result.includes('backlog.json'))
   assert.ok(result.includes('currentMilestoneSnapshot'))
   assert.ok(result.toLowerCase().includes('prefix'), 'must explain the "<id>-" task-id-prefix fallback check')
+})
+
+const FIXTURE_MILESTONE = { id: 'M1', description: 'Farm scene & player movement', scope: 'a small top-down farm plot', dependsOn: [] }
+
+test('milestoneSnapshotPrompt includes the milestone id, the task snapshot, and the per-milestone file paths', () => {
+  const taskResults = [{ task: FIXTURE_TASK, status: 'done', attempts: 1, lastResult: { passed: true, evidence: 'it worked' } }]
+  const result = milestoneSnapshotPrompt(FIXTURE_MILESTONE, taskResults, 'a short GDD', { ready: true, reopenTaskIds: [], summary: 'all good' }, FIXTURE_TARGET_PATH)
+  assert.equal(typeof result, 'string')
+  assert.ok(result.includes(FIXTURE_TARGET_PATH))
+  assert.ok(result.includes(`.pipeline/milestones/${FIXTURE_MILESTONE.id}/backlog.json`))
+  assert.ok(result.includes(`.pipeline/milestones/${FIXTURE_MILESTONE.id}/gdd.md`))
+  assert.ok(result.includes(FIXTURE_TASK.id))
+  assert.ok(result.includes('a short GDD'))
+})
+
+test('milestoneSnapshotPrompt instructs updating milestone-status.json to "blocked" only when finalReview is not ready', () => {
+  const taskResults = [{ task: FIXTURE_TASK, status: 'done', attempts: 4, lastResult: { passed: false, evidence: 'still broken' } }]
+
+  const notReady = milestoneSnapshotPrompt(FIXTURE_MILESTONE, taskResults, 'a short GDD', { ready: false, reopenTaskIds: [FIXTURE_TASK.id], summary: 'still broken' }, FIXTURE_TARGET_PATH)
+  assert.ok(notReady.includes('"blocked"'))
+  assert.ok(notReady.includes('milestone-status.json'))
+
+  const ready = milestoneSnapshotPrompt(FIXTURE_MILESTONE, taskResults, 'a short GDD', { ready: true, reopenTaskIds: [], summary: 'all good' }, FIXTURE_TARGET_PATH)
+  assert.ok(!ready.includes('"blocked"'))
+
+  const missingReview = milestoneSnapshotPrompt(FIXTURE_MILESTONE, taskResults, 'a short GDD', null, FIXTURE_TARGET_PATH)
+  assert.ok(missingReview.includes('"blocked"'), 'a missing final review must be treated the same as not-ready')
 })

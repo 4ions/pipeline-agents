@@ -140,6 +140,57 @@ Return the mode and, depending on mode, the fields described above as
 structured data matching the required schema.`
 }
 
+export function milestoneSnapshotPrompt(milestone, taskResults, gdd, finalReview, targetProjectPath) {
+  const taskSnapshot = taskResults.map(r => ({
+    id: r.task.id,
+    specialization: r.task.specialization,
+    description: r.task.description,
+    successCriterion: r.task.successCriterion,
+    needsArt: r.task.needsArt,
+    needsAnimation: r.task.needsAnimation,
+    status: r.status,
+    attempts: r.attempts,
+  }))
+
+  const statusUpdateBlock = (!finalReview || !finalReview.ready)
+    ? `\n\nThis milestone did NOT pass its final review this round
+(${finalReview ? `summary: ${finalReview.summary}` : 'no final review was produced at all'}).
+CRITICAL — also update ${targetProjectPath}/.pipeline/milestone-status.json:
+read it first (to preserve every OTHER milestone's existing status
+untouched — don't lose history), then write it back with chainStatus set
+to "blocked" and currentMilestoneId set to "${milestone.id}". This
+milestone's own entry in the milestones array stays "status": "current"
+(it is not done — a future resume must retry its reopen-loop, not skip
+it). This is what lets a future run of this workflow pick this milestone
+back up automatically instead of leaving the dashboard showing stale
+progress forever.`
+    : `\n\nThis milestone's final review passed. Do NOT touch
+${targetProjectPath}/.pipeline/milestone-status.json here — the Roadmap
+Review step that runs right after this one owns that update.`
+
+  return `You are recording a permanent snapshot of milestone
+"${milestone.id}" (${milestone.description}) for the Unity project at
+${targetProjectPath} — this runs after every attempt at this milestone's
+own reopen-loop, whether or not it passed, so a future run of this
+workflow can resume from here instead of re-designing this milestone
+from scratch.
+
+Write ${targetProjectPath}/.pipeline/milestones/${milestone.id}/backlog.json
+(using your Write tool — create the directory if it doesn't exist) with
+exactly this task list: ${JSON.stringify(taskSnapshot)}
+
+Write ${targetProjectPath}/.pipeline/milestones/${milestone.id}/gdd.md
+with exactly this text: """${gdd}"""
+${statusUpdateBlock}
+
+Append a "start" line before you begin and a "done" line when you finish
+to ${targetProjectPath}/.pipeline/activity.log.jsonl: {"ts": "<ISO
+timestamp from shell 'date -u +%Y-%m-%dT%H:%M:%SZ'>", "role": "director",
+"specialization": "snapshot", "taskId": null, "event": "start"|"done",
+"detail": "<short note, e.g. 'Snapshot: M1 saved, 3 tasks (ready)' or
+'Snapshot: M2 saved, 5 tasks (blocked, chain paused)'>"}.`
+}
+
 export function roadmapReviewPrompt(roadmap, milestoneResult, targetProjectPath) {
   const remaining = (roadmap.milestones ?? [])
     .map(m => `- [${m.id}] (depends on: ${(m.dependsOn ?? []).length ? m.dependsOn.join(', ') : 'none'}) ${m.description}\n  scope: ${m.scope ?? '(not specified)'}`)
