@@ -203,6 +203,7 @@ test('resumeStatePrompt includes the target project path and explains all three 
   assert.ok(result.includes('"resume"'))
   assert.ok(result.includes('"escalated"'))
   assert.ok(result.includes('complete'), 'must explain that chainStatus "complete" means fresh, not resume')
+  assert.ok(result.includes('"in_progress"') && result.includes('"blocked"'), 'must explain that chainStatus "in_progress" and "blocked" both trigger resume mode')
 })
 
 test('resumeStatePrompt explains the per-milestone snapshot path and the top-level-backlog prefix fallback', () => {
@@ -230,12 +231,12 @@ test('milestoneSnapshotPrompt instructs updating milestone-status.json to "block
   const taskResults = [{ task: FIXTURE_TASK, status: 'done', attempts: 4, lastResult: { passed: false, evidence: 'still broken' } }]
 
   const notReady = milestoneSnapshotPrompt(FIXTURE_MILESTONE, taskResults, 'a short GDD', { ready: false, reopenTaskIds: [FIXTURE_TASK.id], summary: 'still broken' }, FIXTURE_TARGET_PATH)
-  assert.ok(notReady.includes('"blocked"'))
+  assert.ok(notReady.includes('currentMilestoneId set to'), 'not-ready branch must instruct writing currentMilestoneId')
   assert.ok(notReady.includes('milestone-status.json'))
 
   const ready = milestoneSnapshotPrompt(FIXTURE_MILESTONE, taskResults, 'a short GDD', { ready: true, reopenTaskIds: [], summary: 'all good' }, FIXTURE_TARGET_PATH)
-  assert.ok(!ready.includes('"blocked"'))
+  assert.ok(!ready.includes('currentMilestoneId set to'), 'ready branch must NOT instruct the blocked-status update')
 
   const missingReview = milestoneSnapshotPrompt(FIXTURE_MILESTONE, taskResults, 'a short GDD', null, FIXTURE_TARGET_PATH)
-  assert.ok(missingReview.includes('"blocked"'), 'a missing final review must be treated the same as not-ready')
+  assert.ok(missingReview.includes('currentMilestoneId set to'), 'a missing final review must be treated the same as not-ready')
 })

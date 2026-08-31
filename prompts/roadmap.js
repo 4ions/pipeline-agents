@@ -119,6 +119,12 @@ in milestone-status.json (if any):
   ${targetProjectPath}/.pipeline/milestones/ directory convention
   existed: its top-level backlog.json IS that milestone's own backlog,
   simply never copied into the per-milestone path.
+- A backlog with ZERO tasks is never a usable snapshot, even if it passes
+  the checks above (an empty array vacuously satisfies "every task id
+  matches") — if either the per-milestone backlog.json or the top-level
+  backlog.json you would otherwise use is an empty array, treat it the
+  same as neither source being usable: return currentMilestoneSnapshot as
+  null.
 - If neither source is usable (missing entirely, or the top-level
   backlog's task ids don't match this milestone's prefix — meaning a
   LATER milestone has already overwritten it), return

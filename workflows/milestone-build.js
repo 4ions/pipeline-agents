@@ -1413,6 +1413,12 @@ in milestone-status.json (if any):
   ${targetProjectPath}/.pipeline/milestones/ directory convention
   existed: its top-level backlog.json IS that milestone's own backlog,
   simply never copied into the per-milestone path.
+- A backlog with ZERO tasks is never a usable snapshot, even if it passes
+  the checks above (an empty array vacuously satisfies "every task id
+  matches") — if either the per-milestone backlog.json or the top-level
+  backlog.json you would otherwise use is an empty array, treat it the
+  same as neither source being usable: return currentMilestoneSnapshot as
+  null.
 - If neither source is usable (missing entirely, or the top-level
   backlog's task ids don't match this milestone's prefix — meaning a
   LATER milestone has already overwritten it), return
@@ -1690,14 +1696,14 @@ const accumulatedGdds = []
 // Non-null only on a resume where the "current" milestone has a usable
 // snapshot (see resumeStatePrompt) — lets the loop below skip re-running
 // Design/Design Review for exactly that one milestone.
-const currentMilestoneSnapshot = isResuming && resumeState.currentMilestoneSnapshot && Array.isArray(resumeState.currentMilestoneSnapshot.tasks) && resumeState.currentMilestoneSnapshot.gdd
+const currentMilestoneSnapshot = isResuming && resumeState.currentMilestoneSnapshot && Array.isArray(resumeState.currentMilestoneSnapshot.tasks) && resumeState.currentMilestoneSnapshot.tasks.length > 0 && resumeState.currentMilestoneSnapshot.gdd
   ? resumeState.currentMilestoneSnapshot
   : null
 
 if (isResuming && Array.isArray(resumeState.doneMilestones)) {
   for (const dm of resumeState.doneMilestones) {
     if (!dm || !Array.isArray(dm.tasks)) continue
-    accumulatedGdds.push({ id: dm.id, gdd: dm.gdd })
+    accumulatedGdds.push({ id: dm.id, gdd: dm.gdd || '(GDD text unavailable for this milestone)' })
     for (const t of dm.tasks) {
       accumulatedTaskResults.push({ task: t, status: t.status, attempts: t.attempts, lastResult: null, animationResult: null })
     }
@@ -1751,6 +1757,9 @@ now, only what THIS MILESTONE ONLY says above: ${vision.scope}`,
     design = { gdd: currentMilestoneSnapshot.gdd, tasks: currentMilestoneSnapshot.tasks }
     log(`Milestone ${milestone.id}: resuming from its existing snapshot — skipping Design/Design Review, ${design.tasks.length} task(s) loaded.`)
   } else {
+    if (m === 0 && currentMilestoneSnapshot && currentMilestoneSnapshot.id !== milestone.id) {
+      log(`Milestone ${milestone.id}: a loaded snapshot exists for "${currentMilestoneSnapshot.id}" but doesn't match this milestone — designing fresh instead.`)
+    }
     phase('Design')
     design = await agent(designPrompt(milestoneVision, args.targetProjectPath), {
       schema: BACKLOG_SCHEMA,
