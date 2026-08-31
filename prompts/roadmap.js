@@ -62,6 +62,84 @@ Return the vision and the ordered milestones array as structured data
 matching the required schema.`
 }
 
+export function resumeStatePrompt(targetProjectPath) {
+  return `You are checking whether a chained milestone-build run against
+${targetProjectPath} is resuming a PRIOR run or starting FRESH — this runs
+before anything else, every single time milestone-build is invoked, so it
+must read real files rather than guess.
+
+Step 1 — read ${targetProjectPath}/.pipeline/milestone-status.json.
+- If it does not exist, or fails to parse as JSON, or its chainStatus is
+  "complete": return mode "fresh" immediately — omit every other field
+  (vision, remainingMilestones, doneMilestones, currentMilestoneSnapshot).
+  The caller will run the normal fresh-roadmap path from here. Do not
+  write anything to any file in this case.
+- If chainStatus is "escalated": return mode "escalated" with
+  escalationReason set to a short explanation of what needs a human
+  decision — read ${targetProjectPath}/.pipeline/roadmap.md, which
+  roadmapReviewPrompt already writes the escalation reason into, and
+  summarize it. Do not write anything, do not read any further files.
+- If chainStatus is "in_progress" or "blocked": mode is "resume" —
+  continue to Step 2.
+
+Step 2 (only when mode is "resume") — read
+${targetProjectPath}/.pipeline/roadmap.md and
+${targetProjectPath}/.pipeline/vision.md and reconstruct:
+- vision: identity/scope/priorities exactly as written in vision.md.
+- remainingMilestones: every milestone listed in roadmap.md whose id is
+  NOT marked "done" in milestone-status.json, in the SAME order roadmap.md
+  lists them (the "current" one, if any, comes first there already).
+
+Step 3 (only when mode is "resume") — for EVERY milestone marked "done" in
+milestone-status.json, read
+${targetProjectPath}/.pipeline/milestones/<id>/backlog.json and
+${targetProjectPath}/.pipeline/milestones/<id>/gdd.md (substituting that
+milestone's own id for <id>) and add {id, gdd, tasks} to doneMilestones,
+tasks being the exact array from that backlog.json file. If either file
+is missing for a "done" milestone, skip that one milestone silently
+rather than failing the whole load — its history becomes unavailable to
+later playtests/critiques, which is a smaller problem than the whole
+resume failing outright.
+
+Step 4 (only when mode is "resume") — for the milestone marked "current"
+in milestone-status.json (if any):
+- First try ${targetProjectPath}/.pipeline/milestones/<id>/backlog.json
+  and gdd.md (that milestone's own id). If both exist, use them as
+  currentMilestoneSnapshot: {id, gdd, tasks}.
+- If they don't exist yet (this milestone's own reopen-loop never reached
+  a snapshot write — true for any chain that stalled before this feature
+  existed), fall back to reading the TOP-LEVEL
+  ${targetProjectPath}/.pipeline/backlog.json and
+  ${targetProjectPath}/.pipeline/gdd.md. Check whether EVERY task id in
+  that backlog.json starts with the exact prefix "<id>-" (the Designer
+  always prefixes every task id with its owning milestone's id, so this
+  prefix check is reliable) — if every task id matches, use this
+  top-level pair as currentMilestoneSnapshot instead. This is exactly the
+  situation for a chain that stalled before the
+  ${targetProjectPath}/.pipeline/milestones/ directory convention
+  existed: its top-level backlog.json IS that milestone's own backlog,
+  simply never copied into the per-milestone path.
+- If neither source is usable (missing entirely, or the top-level
+  backlog's task ids don't match this milestone's prefix — meaning a
+  LATER milestone has already overwritten it), return
+  currentMilestoneSnapshot as null. The caller will then treat this
+  milestone as not-yet-started and design it fresh, which is the safe
+  fallback — never guess or fabricate a snapshot.
+- If there is no "current" milestone at all in milestone-status.json,
+  also return currentMilestoneSnapshot as null.
+
+Append a "start" line before you begin and a "done" line when you finish
+to ${targetProjectPath}/.pipeline/activity.log.jsonl: {"ts": "<ISO
+timestamp from shell 'date -u +%Y-%m-%dT%H:%M:%SZ'>", "role": "director",
+"specialization": "resume", "taskId": null, "event": "start"|"done",
+"detail": "<short note, e.g. 'Resume check: fresh start' or 'Resume
+check: resuming at M3, 2 done milestones loaded' or 'Resume check:
+escalated, human decision needed'>"}.
+
+Return the mode and, depending on mode, the fields described above as
+structured data matching the required schema.`
+}
+
 export function roadmapReviewPrompt(roadmap, milestoneResult, targetProjectPath) {
   const remaining = (roadmap.milestones ?? [])
     .map(m => `- [${m.id}] (depends on: ${(m.dependsOn ?? []).length ? m.dependsOn.join(', ') : 'none'}) ${m.description}\n  scope: ${m.scope ?? '(not specified)'}`)

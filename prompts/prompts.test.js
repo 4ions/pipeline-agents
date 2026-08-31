@@ -7,7 +7,7 @@ import { implementPrompt, animationReviewPrompt } from './programmer.js'
 import { artPrompt, animatedArtPrompt } from './artist.js'
 import { scenarioTestPrompt, fullPlaytestPrompt } from './tester.js'
 import { qualityCritiquePrompt } from './critic.js'
-import { roadmapPrompt, roadmapReviewPrompt } from './roadmap.js'
+import { roadmapPrompt, roadmapReviewPrompt, resumeStatePrompt } from './roadmap.js'
 
 const FIXTURE_VISION = { identity: 'A test game', scope: 'test scope', priorities: ['fun', 'polish'] }
 const FIXTURE_TASK = { id: 'task-001', specialization: 'gameplay', description: 'Player can jump', successCriterion: 'Jump works', needsArt: false, needsAnimation: false, status: 'todo', attempts: 0 }
@@ -180,4 +180,23 @@ test('roadmapReviewPrompt includes the remaining roadmap and the milestone resul
   assert.ok(result.includes('escalate'))
   assert.ok(result.includes('complete'))
   assert.ok(result.includes('project-map.md'))
+})
+
+test('resumeStatePrompt includes the target project path and explains all three modes with their trigger conditions', () => {
+  const result = resumeStatePrompt(FIXTURE_TARGET_PATH)
+  assert.equal(typeof result, 'string')
+  assert.ok(result.includes(FIXTURE_TARGET_PATH))
+  assert.ok(result.includes('milestone-status.json'))
+  assert.ok(result.includes('"fresh"'))
+  assert.ok(result.includes('"resume"'))
+  assert.ok(result.includes('"escalated"'))
+  assert.ok(result.includes('complete'), 'must explain that chainStatus "complete" means fresh, not resume')
+})
+
+test('resumeStatePrompt explains the per-milestone snapshot path and the top-level-backlog prefix fallback', () => {
+  const result = resumeStatePrompt(FIXTURE_TARGET_PATH)
+  assert.ok(result.includes('.pipeline/milestones/'))
+  assert.ok(result.includes('backlog.json'))
+  assert.ok(result.includes('currentMilestoneSnapshot'))
+  assert.ok(result.toLowerCase().includes('prefix'), 'must explain the "<id>-" task-id-prefix fallback check')
 })
