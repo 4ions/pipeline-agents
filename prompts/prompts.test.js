@@ -49,6 +49,14 @@ test('finalReviewPrompt treats a blocking Quality Critic issue as authoritative'
   assert.ok(result.includes('authoritative'))
 })
 
+test('finalReviewPrompt requires a concrete per-task reason when reopening tasks, not just a bare id list', () => {
+  const taskResults = [{ task: FIXTURE_TASK, status: 'done', attempts: 1, lastResult: { passed: true, evidence: 'it worked' } }]
+  const result = finalReviewPrompt(FIXTURE_VISION, 'a short GDD', taskResults, null, null, null, FIXTURE_TARGET_PATH)
+  assert.ok(result.includes('reopenTasks'))
+  assert.ok(result.toLowerCase().includes('reason'))
+  assert.ok(result.includes('FRESH agent'))
+})
+
 test('designPrompt includes the target project path', () => {
   const result = designPrompt(FIXTURE_VISION, FIXTURE_TARGET_PATH)
   assert.equal(typeof result, 'string')

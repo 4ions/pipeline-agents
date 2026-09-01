@@ -45,10 +45,16 @@ async function animateTask(task, targetProjectPath, vision) {
   return { accepted: false, rounds: MAX_ANIMATION_ROUNDS, feedback }
 }
 
-async function implementAndTestTask(task, targetProjectPath, vision) {
+async function implementAndTestTask(task, targetProjectPath, vision, reopenReason) {
   const animationResult = task.needsAnimation ? await animateTask(task, targetProjectPath, vision) : null
 
-  let lastResult = null
+  // When this task is being re-run because the Director's final review
+  // reopened it (not a fresh task), seed attempt 1 with the reopen reason
+  // as a priorFailure — otherwise the Fixer gets no context at all about
+  // WHY it was reopened and tends to just re-verify the original,
+  // already-passing successCriterion instead of addressing the real
+  // complaint.
+  let lastResult = reopenReason ? { passed: false, evidence: reopenReason, bug: null } : null
   for (let attempt = 1; attempt <= MAX_FIX_ATTEMPTS; attempt++) {
     await agent(implementPrompt(task, attempt, lastResult, targetProjectPath, vision), {
       phase: 'Implementation',
@@ -161,29 +167,28 @@ for (let reopenRound = 0; reopenRound <= MAX_REOPEN_ROUNDS; reopenRound++) {
     {
       phase: 'Report',
       label: `final-review:${reopenRound + 1}`,
-      schema: { type: 'object', required: ['ready', 'reopenTaskIds', 'summary'], properties: {
-        ready: { type: 'boolean' }, reopenTaskIds: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' },
-      } },
+      schema: FINAL_REVIEW_SCHEMA,
     }
   )
 
-  if (!finalReview || finalReview.ready || !Array.isArray(finalReview.reopenTaskIds) || finalReview.reopenTaskIds.length === 0) {
+  if (!finalReview || finalReview.ready || !Array.isArray(finalReview.reopenTasks) || finalReview.reopenTasks.length === 0) {
     break
   }
   if (reopenRound === MAX_REOPEN_ROUNDS) {
     log(`Still not ready after ${MAX_REOPEN_ROUNDS} reopen rounds — reporting as-is rather than looping forever.`)
     break
   }
-  log(`Final review round ${reopenRound + 1}: reopening ${finalReview.reopenTaskIds.join(', ')} — ${finalReview.summary}`)
+  log(`Final review round ${reopenRound + 1}: reopening ${finalReview.reopenTasks.map(rt => rt.taskId).join(', ')} — ${finalReview.summary}`)
 
   phase('Implementation')
-  const reopenIds = new Set(finalReview.reopenTaskIds)
+  const reasonByTaskId = new Map(finalReview.reopenTasks.map(rt => [rt.taskId, rt.reason]))
+  const reopenIds = new Set(reasonByTaskId.keys())
   const tasksToReopen = taskResults
     .filter(r => r && reopenIds.has(r.task.id))
     .map(r => ({ ...r.task, status: 'todo', attempts: 0 }))
   const freshResults = await pipeline(
     tasksToReopen,
-    (task) => implementAndTestTask(task, args.targetProjectPath, args.vision)
+    (task) => implementAndTestTask(task, args.targetProjectPath, args.vision, reasonByTaskId.get(task.id))
   )
   const freshById = new Map(freshResults.map(r => [r.task.id, r]))
   for (let i = 0; i < taskResults.length; i++) {

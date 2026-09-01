@@ -154,9 +154,27 @@ image instead of tiled, and any combat entity (can take damage/die) with
 no visible hurt/death feedback — each of these is a real coherence bug
 this pipeline has shipped before, not cosmetic nitpicking, and any one of
 them alone is enough to mark the game not ready. If something else
-drifted from the vision in a way that matters, list which backlog task
-ids should be reopened and why. Otherwise confirm the game is ready to
-report as done.
+drifted from the vision in a way that matters, or the Quality Critic left
+a blocking issue standing, list which backlog task ids should be reopened
+and why. Otherwise confirm the game is ready to report as done.
+
+CRITICAL — for every task you reopen, return a concrete, actionable
+"reason" alongside its taskId (reopenTasks: [{taskId, reason}], not a
+bare list of ids). The Fixer who picks this up next is a FRESH agent with
+NO memory of this review and no access to what you're reading right now —
+your "reason" text is the ONLY context they get for what to actually
+change. "Vision drift" or "quality issue" is not a reason; name the
+concrete problem (e.g. "HUD crop/money text has no outline/shadow/backing
+panel, washes out against light ground tiles" or "camera never updates
+position, player walks off-screen in room 2"), and if you already know
+what would fix it, say so. If a task is being reopened because the
+Quality Critic flagged it, reuse the Critic's own specific issue
+description verbatim rather than paraphrasing it into something vaguer —
+this pipeline has previously lost real critique detail this way, causing
+the same reopened task to bounce through multiple rounds without the
+actual complaint ever being addressed, because the Fixer had nothing
+concrete to act on and just re-verified the task's original, already-
+passing success criterion instead.
 Append one line to ${targetProjectPath}/.pipeline/progress-log.md
 summarizing your verdict. Also append a "start" line before you begin and
 a "done" line when you finish to

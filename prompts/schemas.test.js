@@ -1,7 +1,7 @@
 // prompts/schemas.test.js
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { VISION_SCHEMA, BACKLOG_SCHEMA, TEST_RESULT_SCHEMA, PLAYTEST_SCHEMA, QUALITY_CRITIQUE_SCHEMA, DESIGN_REVIEW_SCHEMA, MILESTONE_SCHEMA, ROADMAP_SCHEMA, ROADMAP_REVIEW_SCHEMA, MILESTONE_SNAPSHOT_SCHEMA, RESUME_STATE_SCHEMA } from './schemas.js'
+import { VISION_SCHEMA, BACKLOG_SCHEMA, TEST_RESULT_SCHEMA, PLAYTEST_SCHEMA, QUALITY_CRITIQUE_SCHEMA, DESIGN_REVIEW_SCHEMA, MILESTONE_SCHEMA, ROADMAP_SCHEMA, ROADMAP_REVIEW_SCHEMA, MILESTONE_SNAPSHOT_SCHEMA, RESUME_STATE_SCHEMA, FINAL_REVIEW_SCHEMA } from './schemas.js'
 import { validateBacklogTask, TASK_STATUSES } from '../lib/stateSchemas.js'
 
 test('VISION_SCHEMA declares the required top-level fields', () => {
@@ -92,4 +92,12 @@ test('RESUME_STATE_SCHEMA remainingMilestones/doneMilestones/currentMilestoneSna
   assert.equal(RESUME_STATE_SCHEMA.properties.doneMilestones.items, MILESTONE_SNAPSHOT_SCHEMA)
   assert.deepEqual(new Set(RESUME_STATE_SCHEMA.properties.currentMilestoneSnapshot.type), new Set(['object', 'null']))
   assert.equal(RESUME_STATE_SCHEMA.properties.currentMilestoneSnapshot.properties, MILESTONE_SNAPSHOT_SCHEMA.properties)
+})
+
+test('FINAL_REVIEW_SCHEMA requires ready, reopenTasks, and summary, and reopenTasks items require taskId and reason', () => {
+  assert.deepEqual(new Set(FINAL_REVIEW_SCHEMA.required), new Set(['ready', 'reopenTasks', 'summary']))
+  const itemSchema = FINAL_REVIEW_SCHEMA.properties.reopenTasks.items
+  assert.deepEqual(new Set(itemSchema.required), new Set(['taskId', 'reason']))
+  assert.equal(itemSchema.properties.taskId.type, 'string')
+  assert.equal(itemSchema.properties.reason.type, 'string')
 })

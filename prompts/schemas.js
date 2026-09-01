@@ -134,6 +134,29 @@ export const PLAYTEST_SCHEMA = {
   },
 }
 
+export const FINAL_REVIEW_SCHEMA = {
+  type: 'object',
+  required: ['ready', 'reopenTasks', 'summary'],
+  properties: {
+    ready: { type: 'boolean' },
+    reopenTasks: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['taskId', 'reason'],
+        properties: {
+          taskId: { type: 'string' },
+          reason: {
+            type: 'string',
+            description: 'Concrete, actionable reason this specific task is being reopened — the ONLY context a fresh Fixer with no memory of this review will get, so name the actual problem (and what would fix it, if known) rather than a vague label like "vision drift" or "quality issue". If this reopen is driven by the Quality Critic, reuse the Critic\'s own specific issue text rather than summarizing it away.',
+          },
+        },
+      },
+    },
+    summary: { type: 'string' },
+  },
+}
+
 export const MILESTONE_SNAPSHOT_SCHEMA = {
   type: 'object',
   required: ['id', 'gdd', 'tasks'],

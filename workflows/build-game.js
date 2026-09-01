@@ -153,6 +153,29 @@ const PLAYTEST_SCHEMA = {
   },
 }
 
+const FINAL_REVIEW_SCHEMA = {
+  type: 'object',
+  required: ['ready', 'reopenTasks', 'summary'],
+  properties: {
+    ready: { type: 'boolean' },
+    reopenTasks: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['taskId', 'reason'],
+        properties: {
+          taskId: { type: 'string' },
+          reason: {
+            type: 'string',
+            description: 'Concrete, actionable reason this specific task is being reopened — the ONLY context a fresh Fixer with no memory of this review will get, so name the actual problem (and what would fix it, if known) rather than a vague label like "vision drift" or "quality issue". If this reopen is driven by the Quality Critic, reuse the Critic\'s own specific issue text rather than summarizing it away.',
+          },
+        },
+      },
+    },
+    summary: { type: 'string' },
+  },
+}
+
 const MILESTONE_SNAPSHOT_SCHEMA = {
   type: 'object',
   required: ['id', 'gdd', 'tasks'],
@@ -348,9 +371,27 @@ image instead of tiled, and any combat entity (can take damage/die) with
 no visible hurt/death feedback — each of these is a real coherence bug
 this pipeline has shipped before, not cosmetic nitpicking, and any one of
 them alone is enough to mark the game not ready. If something else
-drifted from the vision in a way that matters, list which backlog task
-ids should be reopened and why. Otherwise confirm the game is ready to
-report as done.
+drifted from the vision in a way that matters, or the Quality Critic left
+a blocking issue standing, list which backlog task ids should be reopened
+and why. Otherwise confirm the game is ready to report as done.
+
+CRITICAL — for every task you reopen, return a concrete, actionable
+"reason" alongside its taskId (reopenTasks: [{taskId, reason}], not a
+bare list of ids). The Fixer who picks this up next is a FRESH agent with
+NO memory of this review and no access to what you're reading right now —
+your "reason" text is the ONLY context they get for what to actually
+change. "Vision drift" or "quality issue" is not a reason; name the
+concrete problem (e.g. "HUD crop/money text has no outline/shadow/backing
+panel, washes out against light ground tiles" or "camera never updates
+position, player walks off-screen in room 2"), and if you already know
+what would fix it, say so. If a task is being reopened because the
+Quality Critic flagged it, reuse the Critic's own specific issue
+description verbatim rather than paraphrasing it into something vaguer —
+this pipeline has previously lost real critique detail this way, causing
+the same reopened task to bounce through multiple rounds without the
+actual complaint ever being addressed, because the Fixer had nothing
+concrete to act on and just re-verified the task's original, already-
+passing success criterion instead.
 Append one line to ${targetProjectPath}/.pipeline/progress-log.md
 summarizing your verdict. Also append a "start" line before you begin and
 a "done" line when you finish to
@@ -1350,10 +1391,16 @@ async function animateTask(task, targetProjectPath, vision) {
   return { accepted: false, rounds: MAX_ANIMATION_ROUNDS, feedback }
 }
 
-async function implementAndTestTask(task, targetProjectPath, vision) {
+async function implementAndTestTask(task, targetProjectPath, vision, reopenReason) {
   const animationResult = task.needsAnimation ? await animateTask(task, targetProjectPath, vision) : null
 
-  let lastResult = null
+  // When this task is being re-run because the Director's final review
+  // reopened it (not a fresh task), seed attempt 1 with the reopen reason
+  // as a priorFailure — otherwise the Fixer gets no context at all about
+  // WHY it was reopened and tends to just re-verify the original,
+  // already-passing successCriterion instead of addressing the real
+  // complaint.
+  let lastResult = reopenReason ? { passed: false, evidence: reopenReason, bug: null } : null
   for (let attempt = 1; attempt <= MAX_FIX_ATTEMPTS; attempt++) {
     await agent(implementPrompt(task, attempt, lastResult, targetProjectPath, vision), {
       phase: 'Implementation',
@@ -1546,29 +1593,28 @@ for (let reopenRound = 0; reopenRound <= MAX_REOPEN_ROUNDS; reopenRound++) {
     {
       phase: 'Report',
       label: `final-review:${reopenRound + 1}`,
-      schema: { type: 'object', required: ['ready', 'reopenTaskIds', 'summary'], properties: {
-        ready: { type: 'boolean' }, reopenTaskIds: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' },
-      } },
+      schema: FINAL_REVIEW_SCHEMA,
     }
   )
 
-  if (!finalReview || finalReview.ready || !Array.isArray(finalReview.reopenTaskIds) || finalReview.reopenTaskIds.length === 0) {
+  if (!finalReview || finalReview.ready || !Array.isArray(finalReview.reopenTasks) || finalReview.reopenTasks.length === 0) {
     break
   }
   if (reopenRound === MAX_REOPEN_ROUNDS) {
     log(`Still not ready after ${MAX_REOPEN_ROUNDS} reopen rounds — reporting as-is rather than looping forever.`)
     break
   }
-  log(`Final review round ${reopenRound + 1}: reopening ${finalReview.reopenTaskIds.join(', ')} — ${finalReview.summary}`)
+  log(`Final review round ${reopenRound + 1}: reopening ${finalReview.reopenTasks.map(rt => rt.taskId).join(', ')} — ${finalReview.summary}`)
 
   phase('Implementation')
-  const reopenIds = new Set(finalReview.reopenTaskIds)
+  const reasonByTaskId = new Map(finalReview.reopenTasks.map(rt => [rt.taskId, rt.reason]))
+  const reopenIds = new Set(reasonByTaskId.keys())
   const tasksToReopen = taskResults
     .filter(r => r && reopenIds.has(r.task.id))
     .map(r => ({ ...r.task, status: 'todo', attempts: 0 }))
   const freshResults = await pipeline(
     tasksToReopen,
-    (task) => implementAndTestTask(task, args.targetProjectPath, vision)
+    (task) => implementAndTestTask(task, args.targetProjectPath, vision, reasonByTaskId.get(task.id))
   )
   const freshById = new Map(freshResults.map(r => [r.task.id, r]))
   for (let i = 0; i < taskResults.length; i++) {
