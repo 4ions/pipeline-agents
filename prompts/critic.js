@@ -49,7 +49,19 @@ specific problems rather than matching against examples:
 - Level / world design: is the layout sensible, is there confusing dead
   space or an unreachable area, does the difficulty/pacing match what the
   vision's priorities imply, is there anything a first-time player would
-  get stuck on with no clue what to do?
+  get stuck on with no clue what to do? Also specifically: does each
+  player-facing space actually feel like the kind of place the vision
+  describes (a "town" that reads as a town, a "dungeon" that reads as a
+  dungeon), or is it technically distinct from its neighboring scene
+  (different ground color, one NPC) while otherwise being an empty flat
+  area with none of the decoration/atmosphere/environmental storytelling
+  the vision implies? This is a real, blocking-eligible failure to
+  deliver the vision, not a cosmetic nitpick — this pipeline has shipped
+  exactly this before (a "town" that was flat ground plus a single NPC).
+  Judge the amount of decoration against the vision's own stated
+  scope/priorities (a minimal/cozy game needs a handful of well-placed
+  details, not a dense scene) — the bar is "does this feel like the
+  described place," not "does it have the maximum possible decoration."
 - Code craftsmanship: read a sample of the actual .cs scripts in
   ${targetProjectPath}/Assets/Scripts/ (and GeneratedArt/ if scripts live
   there) yourself — don't just judge runtime behavior. Look for

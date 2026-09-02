@@ -81,6 +81,20 @@ test('designReviewPrompt includes the backlog tasks and vision', () => {
   assert.ok(result.includes(FIXTURE_VISION.identity))
 })
 
+test('designPrompt requires atmosphere/decoration to be named explicitly for player-facing scenes', () => {
+  const result = designPrompt(FIXTURE_VISION, FIXTURE_TARGET_PATH)
+  assert.ok(result.includes('environmental richness'))
+  assert.ok(result.toLowerCase().includes('decoration'))
+  assert.ok(/never\s+acceptable/.test(result))
+})
+
+test('designReviewPrompt checks the backlog for named decoration on player-facing scenes', () => {
+  const backlog = { gdd: 'a short GDD', tasks: [FIXTURE_TASK, FIXTURE_ANIMATED_TASK] }
+  const result = designReviewPrompt(FIXTURE_VISION, backlog.gdd, backlog, FIXTURE_TARGET_PATH)
+  assert.ok(result.toLowerCase().includes('decoration'))
+  assert.ok(result.includes('reject the backlog'))
+})
+
 test('implementPrompt reads as programmer on attempt 1 and fixer on a later retry', () => {
   const programmerResult = implementPrompt(FIXTURE_TASK, 1, null, FIXTURE_TARGET_PATH)
   assert.equal(typeof programmerResult, 'string')
@@ -179,6 +193,13 @@ test('qualityCritiquePrompt includes the GDD and forbids calling issues minor', 
   assert.ok(result.includes('a short GDD'))
   assert.ok(result.includes('FORBIDDEN'))
   assert.ok(result.includes(FIXTURE_TARGET_PATH))
+})
+
+test('qualityCritiquePrompt treats a decoration-free player-facing space as a real, blocking-eligible failure', () => {
+  const taskResults = [{ task: FIXTURE_TASK, status: 'done', attempts: 1, lastResult: { passed: true, evidence: 'it worked' } }]
+  const result = qualityCritiquePrompt(FIXTURE_VISION, 'a short GDD', taskResults, null, FIXTURE_TARGET_PATH)
+  assert.ok(result.toLowerCase().includes('decoration'))
+  assert.ok(result.includes('not a cosmetic nitpick'))
 })
 
 test('roadmapPrompt includes the source document and target path', () => {

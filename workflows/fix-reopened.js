@@ -274,6 +274,16 @@ Check, specifically:
   missing the actual point (the "hook")? A backlog that's in-scope but
   doesn't deliver the vision is a failure just as real as one that's
   over-scope.
+- For every task that creates a new scene/area or substantially
+  populates one (a town, a hub, any space the player spends real time
+  in): does its description name concrete atmosphere/decoration elements
+  (specific props, decorative sprites, ground-texture variation), or does
+  it just say "placeholder art"/"distinct visual style" and leave the
+  actual dressing implicit? A scene with zero named decoration reads as
+  "flat colored ground plus the minimum functional objects," not as the
+  kind of place the vision describes — reject the backlog for this
+  specifically, the same way you'd reject a missing camera-follow task,
+  don't wave it through as a later polish concern.
 - Is anything missing that a reasonable player would expect given the
   vision (e.g. a vision that promises combat but the backlog never adds
   an enemy)?
@@ -491,6 +501,30 @@ implied by "Orthographic camera."
   scene happens to be open in the Editor — if a task's description
   doesn't name the scene, an agent can end up editing the wrong scene
   (including an existing, unrelated scene) without realizing it.
+
+HARD RULE — environmental richness is not optional polish, it is part of
+delivering the vision: whenever a task creates a new scene/area or
+substantially populates one (a town, a dungeon floor, a hub, any space
+the player spends real time in), that task's description MUST name
+concrete atmosphere/decoration elements to add — actual props sized to
+the vision (e.g. "add 3-5 placeholder building silhouettes with distinct
+window/door shapes," "scatter 6-10 decorative flower/rock/puddle sprites
+across the walkable area, non-blocking (no collider)," "add ambient
+ground-texture variation so it doesn't read as one flat color") — not
+left implicit in a generic "placeholder art" or "distinct visual style"
+phrase. A technically-correct empty space that is only differently
+colored from its neighbor is a real failure to deliver the vision, even
+if every literal successCriterion in the backlog passes — this pipeline
+has shipped exactly this (a "town" that was flat ground plus one NPC,
+technically distinct from the farm scene's color but with none of the
+built-up, lived-in feel implied by "town"). Size the amount of
+decoration to the vision's stated scope/priorities (a "cozy, minimal"
+game needs a handful of well-placed details, not a dense scene), but
+zero named decoration for a real player-facing space is never
+acceptable. Purely functional/utility scenes with no player dwell time
+(a loading scene, a hidden test harness) are exempt — say so explicitly
+in that task's description if you're claiming the exemption, don't just
+omit decoration silently.
 
 Only use specializations the game actually needs — a small prototype
 probably only needs gameplay and ui; don't add ai/network/graphics/tools
@@ -1254,7 +1288,19 @@ specific problems rather than matching against examples:
 - Level / world design: is the layout sensible, is there confusing dead
   space or an unreachable area, does the difficulty/pacing match what the
   vision's priorities imply, is there anything a first-time player would
-  get stuck on with no clue what to do?
+  get stuck on with no clue what to do? Also specifically: does each
+  player-facing space actually feel like the kind of place the vision
+  describes (a "town" that reads as a town, a "dungeon" that reads as a
+  dungeon), or is it technically distinct from its neighboring scene
+  (different ground color, one NPC) while otherwise being an empty flat
+  area with none of the decoration/atmosphere/environmental storytelling
+  the vision implies? This is a real, blocking-eligible failure to
+  deliver the vision, not a cosmetic nitpick — this pipeline has shipped
+  exactly this before (a "town" that was flat ground plus a single NPC).
+  Judge the amount of decoration against the vision's own stated
+  scope/priorities (a minimal/cozy game needs a handful of well-placed
+  details, not a dense scene) — the bar is "does this feel like the
+  described place," not "does it have the maximum possible decoration."
 - Code craftsmanship: read a sample of the actual .cs scripts in
   ${targetProjectPath}/Assets/Scripts/ (and GeneratedArt/ if scripts live
   there) yourself — don't just judge runtime behavior. Look for

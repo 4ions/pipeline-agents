@@ -61,6 +61,16 @@ Check, specifically:
   missing the actual point (the "hook")? A backlog that's in-scope but
   doesn't deliver the vision is a failure just as real as one that's
   over-scope.
+- For every task that creates a new scene/area or substantially
+  populates one (a town, a hub, any space the player spends real time
+  in): does its description name concrete atmosphere/decoration elements
+  (specific props, decorative sprites, ground-texture variation), or does
+  it just say "placeholder art"/"distinct visual style" and leave the
+  actual dressing implicit? A scene with zero named decoration reads as
+  "flat colored ground plus the minimum functional objects," not as the
+  kind of place the vision describes — reject the backlog for this
+  specifically, the same way you'd reject a missing camera-follow task,
+  don't wave it through as a later polish concern.
 - Is anything missing that a reasonable player would expect given the
   vision (e.g. a vision that promises combat but the backlog never adds
   an enemy)?

@@ -91,6 +91,30 @@ implied by "Orthographic camera."
   doesn't name the scene, an agent can end up editing the wrong scene
   (including an existing, unrelated scene) without realizing it.
 
+HARD RULE — environmental richness is not optional polish, it is part of
+delivering the vision: whenever a task creates a new scene/area or
+substantially populates one (a town, a dungeon floor, a hub, any space
+the player spends real time in), that task's description MUST name
+concrete atmosphere/decoration elements to add — actual props sized to
+the vision (e.g. "add 3-5 placeholder building silhouettes with distinct
+window/door shapes," "scatter 6-10 decorative flower/rock/puddle sprites
+across the walkable area, non-blocking (no collider)," "add ambient
+ground-texture variation so it doesn't read as one flat color") — not
+left implicit in a generic "placeholder art" or "distinct visual style"
+phrase. A technically-correct empty space that is only differently
+colored from its neighbor is a real failure to deliver the vision, even
+if every literal successCriterion in the backlog passes — this pipeline
+has shipped exactly this (a "town" that was flat ground plus one NPC,
+technically distinct from the farm scene's color but with none of the
+built-up, lived-in feel implied by "town"). Size the amount of
+decoration to the vision's stated scope/priorities (a "cozy, minimal"
+game needs a handful of well-placed details, not a dense scene), but
+zero named decoration for a real player-facing space is never
+acceptable. Purely functional/utility scenes with no player dwell time
+(a loading scene, a hidden test harness) are exempt — say so explicitly
+in that task's description if you're claiming the exemption, don't just
+omit decoration silently.
+
 Only use specializations the game actually needs — a small prototype
 probably only needs gameplay and ui; don't add ai/network/graphics/tools
 tasks unless the vision's scope calls for them.
