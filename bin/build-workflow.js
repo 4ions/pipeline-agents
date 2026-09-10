@@ -50,7 +50,7 @@ export async function generateWorkflowScript(promptFiles, bodyFile) {
 
 // CLI entrypoint: `node bin/build-workflow.js` regenerates every named
 // workflow below from its prompt files + body file.
-const CORE_PROMPT_FILES = ['schemas.js', 'director.js', 'designer.js', 'programmer.js', 'artist.js', 'tester.js', 'critic.js']
+const CORE_PROMPT_FILES = ['schemas.js', 'mlTraining.js', 'director.js', 'designer.js', 'programmer.js', 'artist.js', 'tester.js', 'critic.js']
 
 const WORKFLOWS = [
   { name: 'build-game', promptFiles: CORE_PROMPT_FILES },

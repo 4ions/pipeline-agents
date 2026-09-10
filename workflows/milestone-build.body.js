@@ -66,6 +66,10 @@ async function animateTask(task, targetProjectPath, vision) {
 }
 
 async function implementAndTestTask(task, targetProjectPath, vision, reopenReason) {
+  if (task.taskKind && task.taskKind !== 'standard') {
+    return implementAndVerifyMlTrainingTask(task, targetProjectPath, vision, reopenReason)
+  }
+
   const animationResult = task.needsAnimation ? await animateTask(task, targetProjectPath, vision) : null
 
   // When this task is being re-run because the Director's final review
@@ -93,6 +97,67 @@ async function implementAndTestTask(task, targetProjectPath, vision, reopenReaso
     }
   }
   return { task, status: 'blocked', attempts: MAX_FIX_ATTEMPTS, lastResult, animationResult }
+}
+
+// ML-training tasks don't fit the generic Programmer/Artist/Tester
+// shape: "launch" and "monitor" have no scenarioTestPrompt-style
+// pass/fail cycle at all (launching a background process either
+// succeeds or the task is blocked; monitoring runs until the
+// deterministic script returns a terminal verdict, per
+// docs/superpowers/specs/2026-09-09-ml-agents-training-design.md).
+// Only "integrate-verify" has a real Tester-style retry loop, reusing
+// MAX_FIX_ATTEMPTS the same way standard tasks do.
+async function implementAndVerifyMlTrainingTask(task, targetProjectPath, vision, reopenReason) {
+  if (task.taskKind === 'ml-training-launch') {
+    await agent(launchTrainingPrompt(task, targetProjectPath, vision), {
+      phase: 'Implementation',
+      label: `ml-launch:${task.id}`,
+    })
+    return { task, status: 'done', attempts: 1, lastResult: { passed: true, evidence: 'Training launch task has no pass/fail cycle of its own — its success is implicitly verified by the monitor task actually finding a running training process.' }, animationResult: null }
+  }
+
+  if (task.taskKind === 'ml-training-monitor') {
+    const firstAttempt = await agent(monitorConvergencePrompt(task, targetProjectPath, vision, 1), {
+      phase: 'Implementation',
+      label: `ml-monitor:${task.id}:1`,
+      schema: TRAINING_MONITOR_SCHEMA,
+    })
+    const finalVerdict = (firstAttempt && firstAttempt.action === 'retry')
+      ? await agent(monitorConvergencePrompt(task, targetProjectPath, vision, 2), {
+          phase: 'Implementation',
+          label: `ml-monitor:${task.id}:2`,
+          schema: TRAINING_MONITOR_SCHEMA,
+        })
+      : firstAttempt
+    const succeeded = !!(finalVerdict && finalVerdict.action === 'proceed_to_integration')
+    return {
+      task,
+      status: succeeded ? 'done' : 'blocked',
+      attempts: (firstAttempt && firstAttempt.action === 'retry') ? 2 : 1,
+      lastResult: {
+        passed: succeeded,
+        evidence: finalVerdict ? finalVerdict.reason : 'Monitor task failed to return a result.',
+        bug: succeeded ? undefined : { description: finalVerdict ? `Training did not converge usefully: ${finalVerdict.reason}` : 'Monitor agent returned no result.', reproSteps: [] },
+      },
+      animationResult: null,
+    }
+  }
+
+  // ml-training-integrate-verify: a real Tester-style retry loop, same
+  // shape as the standard-task loop above, using trainedModelVerificationPrompt
+  // instead of implementPrompt+scenarioTestPrompt.
+  let lastResult = reopenReason ? { passed: false, evidence: reopenReason, bug: null } : null
+  for (let attempt = 1; attempt <= MAX_FIX_ATTEMPTS; attempt++) {
+    lastResult = await agent(trainedModelVerificationPrompt(task, attempt, targetProjectPath, vision), {
+      phase: 'Implementation',
+      label: `ml-verify:${task.id}:${attempt}`,
+      schema: TEST_RESULT_SCHEMA,
+    })
+    if (lastResult && lastResult.passed) {
+      return { task, status: 'done', attempts: attempt, lastResult, animationResult: null }
+    }
+  }
+  return { task, status: 'blocked', attempts: MAX_FIX_ATTEMPTS, lastResult, animationResult: null }
 }
 
 // Every invocation checks for prior state first, using the same

@@ -1,5 +1,5 @@
 // GENERATED FILE — do not edit directly.
-// Source: schemas.js, director.js, designer.js, programmer.js, artist.js, tester.js, critic.js, roadmap.js + milestone-build.body.js
+// Source: schemas.js, mlTraining.js, director.js, designer.js, programmer.js, artist.js, tester.js, critic.js, roadmap.js + milestone-build.body.js
 // Regenerate with: node bin/build-workflow.js
 
 export const meta = {
@@ -41,6 +41,11 @@ const BACKLOG_TASK_SCHEMA = {
     needsAnimation: { type: 'boolean', description: 'true if this task\'s GameObject moves or reacts to something and needs at least an idle state plus one action state' },
     status: { type: 'string', enum: ['todo', 'in_progress', 'done', 'blocked'] },
     attempts: { type: 'number' },
+    taskKind: {
+      type: 'string',
+      enum: ['standard', 'ml-training-launch', 'ml-training-monitor', 'ml-training-integrate-verify'],
+      description: 'Defaults to "standard" (the normal Programmer/Artist/Tester implementation cycle) when omitted — every task in every other milestone this pipeline has ever built is "standard". Only set this for a milestone specifically about ML-Agents training: "ml-training-launch" for the task that exports a standalone build and starts an mlagents-learn run in the background; "ml-training-monitor" for the task that polls that run\'s convergence and decides when to stop it; "ml-training-integrate-verify" for the task that assigns the resulting trained model and verifies its measured hunt/evasion success rates via real Play Mode.',
+    },
   },
 }
 
@@ -182,6 +187,31 @@ const FINAL_REVIEW_SCHEMA = {
   },
 }
 
+const TRAINING_MONITOR_SCHEMA = {
+  type: 'object',
+  required: ['verdict', 'action', 'reason'],
+  properties: {
+    verdict: {
+      type: 'string',
+      enum: ['plateau', 'plateau_degenerate', 'diverge'],
+      description: 'The deterministic convergence-check script\'s own verdict, copied verbatim — never re-derived from raw numbers by the agent itself. "plateau" is a genuine converged, non-degenerate result. "plateau_degenerate" is a flat reward curve with near-zero hunt attempts (the pure-forager equilibrium) — NOT a success even though the reward curve looks fine. "diverge" is reward collapse.',
+    },
+    action: {
+      type: 'string',
+      enum: ['proceed_to_integration', 'retry', 'escalate'],
+      description: '"proceed_to_integration" only for verdict "plateau". "retry" for "plateau_degenerate" or "diverge" on the FIRST attempt (one adjusted-config retry, per the spec\'s bounded-retry design — mirrors this pipeline\'s existing MAX_MILESTONE_REOPEN_ROUNDS pattern). "escalate" if this is already a retry attempt and it also ended in "plateau_degenerate" or "diverge" — never a second automatic retry.',
+    },
+    reason: {
+      type: 'string',
+      description: 'Concrete, numeric — cite the actual observed rolling-mean/std/episode-length/role-balance numbers the script reported, not a vague restatement of the verdict.',
+    },
+    adjustedConfig: {
+      type: 'string',
+      description: 'Present only when action is "retry" — the SPECIFIC config change being made (e.g. "widened curriculum stage 1 power-variance range from X-Y to X2-Y2" or "raised hunt-success reward from 0.3 to 0.5"), per the spec\'s constraint that a retry must be a concrete, bounded, documented adjustment, not open-ended re-engineering.',
+    },
+  },
+}
+
 const MILESTONE_SNAPSHOT_SCHEMA = {
   type: 'object',
   required: ['id', 'gdd', 'tasks'],
@@ -219,6 +249,208 @@ const RESUME_STATE_SCHEMA = {
       description: 'Only present when mode is "resume". The "current" milestone\'s own snapshot if one is usable, otherwise null (meaning: treat it as not-yet-started and design it fresh)',
     },
   },
+}
+
+function launchTrainingPrompt(task, targetProjectPath, vision) {
+  return `You are a SENIOR ${task.specialization} Unity/ML-Agents engineer
+working on ${targetProjectPath} — this task exports a standalone Player
+build of the current scene and launches an ML-Agents PPO training run
+against it in the background, per
+${targetProjectPath}/../auto-game-build/docs/superpowers/specs/2026-09-09-ml-agents-training-design.md
+("Training architecture" / "Execution").
+${vision ? `
+Full game context: """${vision.identity}""" Priorities, in order: ${vision.priorities.join(', ')}.
+` : ''}
+Task: ${task.description}
+Success criterion: ${task.successCriterion}
+
+CRITICAL — export a STANDALONE build, do not train against the live
+Editor. Live Editor Play Mode in this environment has a known OS-focus
+dependency that a headless training run must not inherit, and training
+needs native simulation speed with no MCP/agent round-trip per step.
+Use the funplay-unity MCP tools (search for "funplay" if you don't see
+them yet) to find a build-export tool; if none exists, use execute_code
+to call UnityEditor.BuildPipeline.BuildPlayer with a Windows/Mac/Linux
+standalone target matching this machine, output path
+${targetProjectPath}/Builds/TrainingPlayer/. Confirm the build actually
+produced an executable before proceeding — do not assume BuildPipeline
+succeeded just because it returned without throwing.
+
+CRITICAL — launch mlagents-learn with these settings EXPLICITLY set in
+the trainer config YAML, not left at defaults:
+- engine_settings.time_scale: at least 20 (ML-Agents' own default) —
+  raise it further for this lightweight 2D scene if the training
+  machine's CPU allows; nobody watches training happen, there's no
+  reason to run at 1x.
+- engine_settings.no_graphics: true — nothing needs rendering during
+  training.
+- network_settings.normalize: false — this design's observations are
+  already manually bounded to [0,1]/[-1,1] via explicit formulas in the
+  spec; stacking ML-Agents' own running normalization on top is an
+  unnecessary source of early-training instability.
+- max_steps: set from real research into a comparable ML-Agents
+  multi-agent example's actual step count (the spec explicitly warns
+  the mlagents-learn default of 500,000 is two orders of magnitude too
+  low for this task class) — do NOT leave this at default.
+Launch via Bash: \`mlagents-learn <config>.yaml --env=<build path>
+--run-id=<a stable id derived from "${task.id}"> --num-envs=<N, bounded
+by this machine's actual CPU core count — check with
+\`sysctl -n hw.ncpu\` or \`nproc\`, don't guess> --no-graphics &\` — run
+it as a background process (redirect stdout/stderr to a log file under
+${targetProjectPath}/.pipeline/ml-training/), do not block this task
+waiting for training to finish; that's the monitor task's job.
+If a previous run with the same run-id already has checkpoints (this
+task is being re-run after an interruption), pass --resume instead of
+starting fresh.
+
+CRITICAL — write ${targetProjectPath}/.pipeline/ml-training/${task.id}-run.json
+with the exact run-id, the mlagents-learn results/TensorBoard logdir
+path, and the build path used — the monitor task (a separate, later
+task) reads this file to know what to watch. Use your Read/Write tools
+for this, not execute_code.
+
+Append a "start" line and, when the process is confirmed launched (not
+when training finishes — that's a different task), a "done" line to
+${targetProjectPath}/.pipeline/activity.log.jsonl: {"ts": "<ISO
+timestamp from shell 'date -u +%Y-%m-%dT%H:%M:%SZ'>", "role":
+"programmer", "specialization": "${task.specialization}", "taskId":
+"${task.id}", "event": "start"|"done", "detail": "<short note, e.g.
+'Launched training run <run-id>, num-envs=N, max_steps=X'>"}.
+
+Report back the run-id, the logdir path, and confirmation the training
+process is actually running (not just that the launch command returned
+without error — check the process is alive and the log file is
+growing).`
+}
+
+function monitorConvergencePrompt(task, targetProjectPath, vision, attemptNumber) {
+  const isRetry = attemptNumber >= 2
+  return `You are monitoring an ML-Agents training run for
+${targetProjectPath}, per
+${targetProjectPath}/../auto-game-build/docs/superpowers/specs/2026-09-09-ml-agents-training-design.md
+("Convergence monitoring").
+${vision ? `
+Full game context: """${vision.identity}""" Priorities, in order: ${vision.priorities.join(', ')}.
+` : ''}
+Task: ${task.description}
+Success criterion: ${task.successCriterion}
+This is monitoring attempt ${attemptNumber}${isRetry ? ' (the ONE bounded retry after an earlier plateau_degenerate/diverge verdict — see below)' : ' (the first attempt)'}.
+
+Read ${targetProjectPath}/.pipeline/ml-training/${task.id.replace(/-T\d+$/, '')}-T1-run.json
+(written by the launch task) for the training run's logdir path.
+
+CRITICAL — you NEVER judge convergence by reading raw Mean
+Reward/Std/episode-length numbers yourself. Loop: run
+\`python3 <path to auto-game-build repo>/tools/training_convergence_check.py
+--logdir <logdir from the run.json>\` via Bash (use the World project's
+own venv Python at .venv-mlagents/bin/python3, which already has
+tensorboard installed), wait a reasonable interval (e.g. \`sleep 300\`)
+between checks so you're not spamming the filesystem, and repeat until
+the script's own JSON output reports a verdict other than "continue"
+(that field is called "verdict" in its JSON output — it is the ONLY
+thing you read to decide what happened, not the underlying reward
+numbers). This can take a genuinely long time (potentially hours) —
+keep looping within this same task, don't give up early.
+
+Once the script reports a terminal verdict, decide the action per this
+table (this is the ENTIRE decision logic — do not improvise a different
+mapping):
+- verdict "plateau" -> action "proceed_to_integration".
+- verdict "plateau_degenerate" or "diverge"${isRetry ? `, and this IS
+  attempt ${attemptNumber} (a retry) -> action "escalate". Do NOT set
+  action to "retry" here — the one automatic retry budget for this
+  training run is already used; a second automatic retry is never
+  allowed, escalate to a human via the Director's existing blocked-task
+  path instead.` : ` -> action "retry". Pick ONE concrete, bounded
+  adjustment (not open-ended re-engineering) and state it in
+  "adjustedConfig": either widen the curriculum's early-stage
+  encounter-forcing ranges further than the first attempt used, or
+  raise the hunting/evading reward magnitudes relative to foraging
+  (staying within the spec's ≤1.0-magnitude, [-1,1]-per-decision
+  constraints). Then actually relaunch training with that one change
+  (same process as the launch task, but with the adjusted config and a
+  new run-id) before returning your structured result.`}
+
+Report your decision as structured data: verdict (copied verbatim from
+the script), action, reason (cite the script's own numeric reason text,
+not a restatement), and adjustedConfig (only when action is "retry").`
+}
+
+function trainedModelVerificationPrompt(task, attempt, targetProjectPath, vision) {
+  return `You are a SENIOR QA engineer verifying a newly-trained
+ML-Agents model for ${targetProjectPath}, per
+${targetProjectPath}/../auto-game-build/docs/superpowers/specs/2026-09-09-ml-agents-training-design.md
+("Model integration & verification").
+${vision ? `
+Full game context: """${vision.identity}""" Priorities, in order: ${vision.priorities.join(', ')}.
+` : ''}
+Task: ${task.description}
+Success criterion: ${task.successCriterion}
+This is check attempt ${attempt} for this task.
+
+CRITICAL — checkpoint selection: do NOT simply use the last/highest-numbered
+checkpoint from training. Read the role-balance telemetry (hunt
+attempts/successes, forage/flee/engage fractions) for each saved
+checkpoint and pick the one with the most balanced, non-degenerate role
+distribution — per the spec, the final checkpoint can plausibly
+correspond to a moment where hunting/evading signal had already started
+thinning out (a one-way curriculum's "forgetting" risk) even if Mean
+Reward looks fine there.
+
+Copy the selected checkpoint's exported .onnx into
+${targetProjectPath}/Assets/, and assign it to the trained agents'
+Behavior Parameters component, model field, in Inference mode (not
+Heuristic or Default).
+
+CRITICAL — this is a MEASURED pass/fail, not a qualitative "looks
+sensible" judgment. Imperfect behavior (a missed catch, a failed
+evasion) is NORMAL and expected from a trained policy — it is NOT
+automatically a bug the way it would be for deterministic rule-based
+code. Do this instead:
+1. Enter Play Mode and observe (or play against, if this involves the
+   player) the trained agents for long enough to accumulate at least 15-20
+   encounters (an "encounter" is defined the same way as in the reward
+   function's EncounterTelemetry component: begins when a higher/lower-power
+   agent enters immediate range with the established hysteresis
+   margin/dwell-time/cooldown, ends on separation past that margin or on
+   a catch) — not a fixed time window, since encounter rate varies and a
+   fixed window could accumulate too few data points to mean anything.
+2. Read the EncounterTelemetry log/counters via get_console_logs or
+   get_component_properties (same tooling you already use for other
+   verification tasks in this pipeline).
+3. Compute hunt-success rate and evasion-success rate SEPARATELY — they
+   are different skills; do not collapse them into one aggregate number,
+   since that would hide a model that's only good at one.
+4. PASS requires each rate to fall within an expected band: floor
+   ~30-40% (below this, the model is barely functional — rule out with
+   a FAIL), ceiling near 100% is treated as suspicious, not celebrated
+   (investigate whether the encounter-difficulty configuration made that
+   skill trivially easy, or something is exploiting the encounter/catch
+   logic, before accepting it as a genuinely good result). Both bounds
+   are starting points from the spec to tune against this run's actual
+   numbers, not fixed truths — if the real observed rates cluster
+   somewhere unexpected relative to this band, note that as evidence for
+   revising the band, not automatically as a bug in the model.
+5. If either rate falls outside the expected band, this is a real FAIL
+   — report it with the actual observed numbers (encounters observed,
+   successes, computed rate) as evidence, matching this pipeline's
+   TEST_RESULT_SCHEMA bug-reporting convention.
+
+Append a "start" line and, when done, a "done" line to
+${targetProjectPath}/.pipeline/activity.log.jsonl: {"ts": "<ISO
+timestamp from shell 'date -u +%Y-%m-%dT%H:%M:%SZ'>", "role": "tester",
+"specialization": "${task.specialization}", "taskId": "${task.id}",
+"event": "start"|"done", "detail": "<short note with the measured rates>"}.
+
+You are also the only role that keeps ${targetProjectPath}/.pipeline/backlog.json
+current for this task — after you decide pass/fail, read backlog.json,
+find the task with id "${task.id}", set "attempts" to ${attempt} and
+"status" to "done" if this passed (leave "todo" otherwise), and write
+the file back, same as every other Tester task in this pipeline.
+
+Return whether it passed, the measured evidence (both rates, with the
+raw counts they're computed from), and — only if it did not pass — a
+bug description citing the specific rate(s) outside the expected band.`
 }
 
 function visionPrompt(gameIdea, targetProjectPath) {
@@ -550,6 +782,28 @@ implement it. Every task MUST have:
   cozy, minimal game needs a small, simple particle burst, not a
   particle-heavy action-game VFX system) — the bar is "this specific
   action has SOME visible physical feedback," not maximum spectacle.
+- CRITICAL — taskKind: leave this unset (it defaults to "standard", the
+  normal Programmer/Artist/Tester cycle) for every task in every milestone
+  EXCEPT one specifically about ML-Agents training. If — and only if —
+  this milestone's scope is training a reinforcement-learning model (the
+  environment C# code itself, e.g. the Agent/Academy scripts implementing
+  observation/action/reward, is still a "standard" task; it's just normal
+  C# game code verified the normal way), author exactly these three
+  ADDITIONAL tasks in this order, each with the matching taskKind:
+  1. taskKind "ml-training-launch" — exports a standalone build and starts
+     the training run in the background.
+  2. taskKind "ml-training-monitor" — polls the training run's convergence
+     and decides when to stop it (this can take a genuinely long time;
+     its successCriterion should describe reaching a definitive stop
+     verdict, not a fixed duration).
+  3. taskKind "ml-training-integrate-verify" — assigns the resulting
+     trained model and verifies its measured hunt/evasion success rates
+     in real Play Mode.
+  These three have a real sequential dependency (launch, then monitor,
+  then integrate) — describe that dependency in each task's description
+  so it's clear to whoever reads the backlog later, even though this
+  pipeline's Implementation phase already runs backlog tasks through
+  its normal pipeline() call in array order.
 
 HARD RULE — shared state gets ONE owner, everyone else reads it: whenever
 more than one task will need the same underlying concept (world/level
@@ -1917,6 +2171,10 @@ async function animateTask(task, targetProjectPath, vision) {
 }
 
 async function implementAndTestTask(task, targetProjectPath, vision, reopenReason) {
+  if (task.taskKind && task.taskKind !== 'standard') {
+    return implementAndVerifyMlTrainingTask(task, targetProjectPath, vision, reopenReason)
+  }
+
   const animationResult = task.needsAnimation ? await animateTask(task, targetProjectPath, vision) : null
 
   // When this task is being re-run because the Director's final review
@@ -1944,6 +2202,67 @@ async function implementAndTestTask(task, targetProjectPath, vision, reopenReaso
     }
   }
   return { task, status: 'blocked', attempts: MAX_FIX_ATTEMPTS, lastResult, animationResult }
+}
+
+// ML-training tasks don't fit the generic Programmer/Artist/Tester
+// shape: "launch" and "monitor" have no scenarioTestPrompt-style
+// pass/fail cycle at all (launching a background process either
+// succeeds or the task is blocked; monitoring runs until the
+// deterministic script returns a terminal verdict, per
+// docs/superpowers/specs/2026-09-09-ml-agents-training-design.md).
+// Only "integrate-verify" has a real Tester-style retry loop, reusing
+// MAX_FIX_ATTEMPTS the same way standard tasks do.
+async function implementAndVerifyMlTrainingTask(task, targetProjectPath, vision, reopenReason) {
+  if (task.taskKind === 'ml-training-launch') {
+    await agent(launchTrainingPrompt(task, targetProjectPath, vision), {
+      phase: 'Implementation',
+      label: `ml-launch:${task.id}`,
+    })
+    return { task, status: 'done', attempts: 1, lastResult: { passed: true, evidence: 'Training launch task has no pass/fail cycle of its own — its success is implicitly verified by the monitor task actually finding a running training process.' }, animationResult: null }
+  }
+
+  if (task.taskKind === 'ml-training-monitor') {
+    const firstAttempt = await agent(monitorConvergencePrompt(task, targetProjectPath, vision, 1), {
+      phase: 'Implementation',
+      label: `ml-monitor:${task.id}:1`,
+      schema: TRAINING_MONITOR_SCHEMA,
+    })
+    const finalVerdict = (firstAttempt && firstAttempt.action === 'retry')
+      ? await agent(monitorConvergencePrompt(task, targetProjectPath, vision, 2), {
+          phase: 'Implementation',
+          label: `ml-monitor:${task.id}:2`,
+          schema: TRAINING_MONITOR_SCHEMA,
+        })
+      : firstAttempt
+    const succeeded = !!(finalVerdict && finalVerdict.action === 'proceed_to_integration')
+    return {
+      task,
+      status: succeeded ? 'done' : 'blocked',
+      attempts: (firstAttempt && firstAttempt.action === 'retry') ? 2 : 1,
+      lastResult: {
+        passed: succeeded,
+        evidence: finalVerdict ? finalVerdict.reason : 'Monitor task failed to return a result.',
+        bug: succeeded ? undefined : { description: finalVerdict ? `Training did not converge usefully: ${finalVerdict.reason}` : 'Monitor agent returned no result.', reproSteps: [] },
+      },
+      animationResult: null,
+    }
+  }
+
+  // ml-training-integrate-verify: a real Tester-style retry loop, same
+  // shape as the standard-task loop above, using trainedModelVerificationPrompt
+  // instead of implementPrompt+scenarioTestPrompt.
+  let lastResult = reopenReason ? { passed: false, evidence: reopenReason, bug: null } : null
+  for (let attempt = 1; attempt <= MAX_FIX_ATTEMPTS; attempt++) {
+    lastResult = await agent(trainedModelVerificationPrompt(task, attempt, targetProjectPath, vision), {
+      phase: 'Implementation',
+      label: `ml-verify:${task.id}:${attempt}`,
+      schema: TEST_RESULT_SCHEMA,
+    })
+    if (lastResult && lastResult.passed) {
+      return { task, status: 'done', attempts: attempt, lastResult, animationResult: null }
+    }
+  }
+  return { task, status: 'blocked', attempts: MAX_FIX_ATTEMPTS, lastResult, animationResult: null }
 }
 
 // Every invocation checks for prior state first, using the same
