@@ -398,7 +398,7 @@ test('monitorConvergencePrompt instructs looping the convergence-check script vi
   assert.ok(result.includes('training_convergence_check.py'))
   assert.ok(result.includes('plateau_degenerate'))
   assert.ok(result.includes('diverge'))
-  assert.ok(result.includes('never') && result.toLowerCase().includes('raw'), 'must warn against reasoning over raw numbers directly')
+  assert.ok(result.toLowerCase().includes('never') && result.toLowerCase().includes('raw'), 'must warn against reasoning over raw numbers directly')
 })
 
 test('monitorConvergencePrompt treats attempt 2 as the bounded retry, escalating instead of retrying again on a repeat bad verdict', () => {
@@ -408,4 +408,22 @@ test('monitorConvergencePrompt treats attempt 2 as the bounded retry, escalating
   const secondAttempt = monitorConvergencePrompt(FIXTURE_ML_MONITOR_TASK, FIXTURE_TARGET_PATH, FIXTURE_VISION, 2)
   assert.ok(secondAttempt.includes('escalate'))
   assert.ok(secondAttempt.includes('do NOT') || secondAttempt.includes('never'), 'must forbid a second automatic retry')
+})
+
+const FIXTURE_ML_VERIFY_TASK = { ...FIXTURE_TASK, id: 'M13-T3', taskKind: 'ml-training-integrate-verify', description: 'Assign the trained model and verify measured hunt/evasion success rates' }
+
+test('trainedModelVerificationPrompt requires a concrete, measured pass/fail band (not qualitative judgment) using EncounterTelemetry', () => {
+  const result = trainedModelVerificationPrompt(FIXTURE_ML_VERIFY_TASK, 1, FIXTURE_TARGET_PATH, FIXTURE_VISION)
+  assert.equal(typeof result, 'string')
+  assert.ok(result.includes('EncounterTelemetry'))
+  assert.ok(result.includes('15') || result.includes('20'), 'must specify a concrete minimum encounter count, not a vague amount')
+  assert.ok(result.toLowerCase().includes('floor'))
+  assert.ok(result.toLowerCase().includes('ceiling') || result.toLowerCase().includes('suspicio'))
+  assert.ok(result.toLowerCase().includes('inference'))
+})
+
+test('trainedModelVerificationPrompt selects the deployed checkpoint by role-balance telemetry, not simply the last one saved', () => {
+  const result = trainedModelVerificationPrompt(FIXTURE_ML_VERIFY_TASK, 1, FIXTURE_TARGET_PATH, FIXTURE_VISION)
+  assert.ok(result.toLowerCase().includes('checkpoint'))
+  assert.ok(result.includes('not') && result.toLowerCase().includes('last'))
 })

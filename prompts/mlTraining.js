@@ -122,3 +122,80 @@ Report your decision as structured data: verdict (copied verbatim from
 the script), action, reason (cite the script's own numeric reason text,
 not a restatement), and adjustedConfig (only when action is "retry").`
 }
+
+export function trainedModelVerificationPrompt(task, attempt, targetProjectPath, vision) {
+  return `You are a SENIOR QA engineer verifying a newly-trained
+ML-Agents model for ${targetProjectPath}, per
+${targetProjectPath}/../auto-game-build/docs/superpowers/specs/2026-09-09-ml-agents-training-design.md
+("Model integration & verification").
+${vision ? `
+Full game context: """${vision.identity}""" Priorities, in order: ${vision.priorities.join(', ')}.
+` : ''}
+Task: ${task.description}
+Success criterion: ${task.successCriterion}
+This is check attempt ${attempt} for this task.
+
+CRITICAL — checkpoint selection: do NOT simply use the last/highest-numbered
+checkpoint from training. Read the role-balance telemetry (hunt
+attempts/successes, forage/flee/engage fractions) for each saved
+checkpoint and pick the one with the most balanced, non-degenerate role
+distribution — per the spec, the final checkpoint can plausibly
+correspond to a moment where hunting/evading signal had already started
+thinning out (a one-way curriculum's "forgetting" risk) even if Mean
+Reward looks fine there.
+
+Copy the selected checkpoint's exported .onnx into
+${targetProjectPath}/Assets/, and assign it to the trained agents'
+Behavior Parameters component, model field, in Inference mode (not
+Heuristic or Default).
+
+CRITICAL — this is a MEASURED pass/fail, not a qualitative "looks
+sensible" judgment. Imperfect behavior (a missed catch, a failed
+evasion) is NORMAL and expected from a trained policy — it is NOT
+automatically a bug the way it would be for deterministic rule-based
+code. Do this instead:
+1. Enter Play Mode and observe (or play against, if this involves the
+   player) the trained agents for long enough to accumulate at least 15-20
+   encounters (an "encounter" is defined the same way as in the reward
+   function's EncounterTelemetry component: begins when a higher/lower-power
+   agent enters immediate range with the established hysteresis
+   margin/dwell-time/cooldown, ends on separation past that margin or on
+   a catch) — not a fixed time window, since encounter rate varies and a
+   fixed window could accumulate too few data points to mean anything.
+2. Read the EncounterTelemetry log/counters via get_console_logs or
+   get_component_properties (same tooling you already use for other
+   verification tasks in this pipeline).
+3. Compute hunt-success rate and evasion-success rate SEPARATELY — they
+   are different skills; do not collapse them into one aggregate number,
+   since that would hide a model that's only good at one.
+4. PASS requires each rate to fall within an expected band: floor
+   ~30-40% (below this, the model is barely functional — rule out with
+   a FAIL), ceiling near 100% is treated as suspicious, not celebrated
+   (investigate whether the encounter-difficulty configuration made that
+   skill trivially easy, or something is exploiting the encounter/catch
+   logic, before accepting it as a genuinely good result). Both bounds
+   are starting points from the spec to tune against this run's actual
+   numbers, not fixed truths — if the real observed rates cluster
+   somewhere unexpected relative to this band, note that as evidence for
+   revising the band, not automatically as a bug in the model.
+5. If either rate falls outside the expected band, this is a real FAIL
+   — report it with the actual observed numbers (encounters observed,
+   successes, computed rate) as evidence, matching this pipeline's
+   TEST_RESULT_SCHEMA bug-reporting convention.
+
+Append a "start" line and, when done, a "done" line to
+${targetProjectPath}/.pipeline/activity.log.jsonl: {"ts": "<ISO
+timestamp from shell 'date -u +%Y-%m-%dT%H:%M:%SZ'>", "role": "tester",
+"specialization": "${task.specialization}", "taskId": "${task.id}",
+"event": "start"|"done", "detail": "<short note with the measured rates>"}.
+
+You are also the only role that keeps ${targetProjectPath}/.pipeline/backlog.json
+current for this task — after you decide pass/fail, read backlog.json,
+find the task with id "${task.id}", set "attempts" to ${attempt} and
+"status" to "done" if this passed (leave "todo" otherwise), and write
+the file back, same as every other Tester task in this pipeline.
+
+Return whether it passed, the measured evidence (both rates, with the
+raw counts they're computed from), and — only if it did not pass — a
+bug description citing the specific rate(s) outside the expected band.`
+}
