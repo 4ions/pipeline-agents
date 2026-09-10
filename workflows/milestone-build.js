@@ -171,6 +171,10 @@ const FINAL_REVIEW_SCHEMA = {
             type: 'string',
             description: 'Concrete, actionable reason this specific task is being reopened — the ONLY context a fresh Fixer with no memory of this review will get, so name the actual problem (and what would fix it, if known) rather than a vague label like "vision drift" or "quality issue". If this reopen is driven by the Quality Critic, reuse the Critic\'s own specific issue text rather than summarizing it away.',
           },
+          correctedSuccessCriterion: {
+            type: 'string',
+            description: 'ONLY set this when the task\'s ORIGINAL successCriterion is itself factually wrong — objectively incompatible with a verified functional constraint (e.g. it names a specific key binding that provably collides with an existing control), not merely hard to satisfy or a matter of taste. Give the corrected criterion text verbatim, ready to replace the stored one. Leave unset for an ordinary reopen (a real bug, a missed detail, a quality issue) where the original criterion is still correct and only the implementation needs to change — setting this for anything less than a proven factual error would let a reopen silently rewrite a task\'s requirements instead of fixing the code.',
+          },
         },
       },
     },
@@ -290,6 +294,11 @@ Check, specifically:
   kind of place the vision describes — reject the backlog for this
   specifically, the same way you'd reject a missing camera-follow task,
   don't wave it through as a later polish concern.
+- For every task whose action has an obvious physical impact (watering,
+  harvesting, landing a hit, walking through mud/tall grass), does its
+  description name a concrete particle/VFX effect (splash, dust puff,
+  impact burst), or is that left implicit? Reject the backlog for this
+  specifically if it's missing, the same way as missing decoration.
 - Is anything missing that a reasonable player would expect given the
   vision (e.g. a vision that promises combat but the backlog never adds
   an enemy)?
@@ -370,6 +379,23 @@ Full playtest result: ${playtestResult ? JSON.stringify(playtestResult) : 'MISSI
 ${directorDecisions ? `Earlier escalation decisions you already made on blocked tasks: ${JSON.stringify(directorDecisions)}` : 'No tasks were blocked.'}
 ${qualityCritique ? `The Quality Critic — a separate, zero-tolerance reviewer whose only job is to catch mediocre/half-finished work — gave this verdict after the polish-fix rounds ran their course: ${JSON.stringify(qualityCritique)}. Any remaining "blocking" issue in this critique means the game is NOT ready, no exceptions — treat the Critic's verdict as authoritative on quality, the same way you treat the playtest as authoritative on functionality.` : 'The Quality Critic did not return a result — treat quality as unverified, not as passing.'}
 
+CRITICAL — the Critic's LATEST verdict overrides older evidence about the
+SAME symptom: "Task results" above is the full accumulated history,
+including earlier rounds' evidence text written before a bug was fixed —
+that older text can still describe a symptom (e.g. "clipping," "wrong
+color," "missing state") that a later fix already resolved. If the
+Quality Critic's most recent pass explicitly states it could not
+reproduce a specific issue, or reports zero blocking issues where an
+earlier round once found one, treat THAT as the current, authoritative
+state of that specific issue — do not reopen a task for it by pattern-
+matching keywords in older, superseded task-result evidence. This
+pipeline has reopened a task for a bug the Critic had just explicitly
+reported as not reproducible in the same review, which wastes a reopen
+round doing nothing (the Fixer has no live bug to find) and can exhaust
+the reopen budget before a real remaining issue gets its turn. Only
+reopen a task for a symptom the CURRENT round's Critic pass (or your own
+fresh read of the current playtest result) actually still supports.
+
 Check whether what was actually built still matches the original vision
 (not just whether it technically works). This pipeline builds 2D games
 exclusively — if any task result's evidence suggests 3D primitives, 3D
@@ -404,6 +430,43 @@ the same reopened task to bounce through multiple rounds without the
 actual complaint ever being addressed, because the Fixer had nothing
 concrete to act on and just re-verified the task's original, already-
 passing success criterion instead.
+
+CRITICAL — taskId must be the EXACT id of a real task from the task
+results you were given above (e.g. "M4-T4"), copied verbatim — never a
+free-text label describing the problem (e.g. "player-collision fix" is
+NOT a valid taskId). The reopen mechanism dispatches work by looking up
+this exact id; an invented label matches nothing and the fix silently
+never happens — the bug just resurfaces every review with no one ever
+assigned to it. If a real bug doesn't cleanly belong to any single
+existing task (the Quality Critic may have flagged it with taskId: null
+for exactly this reason), do NOT invent a label — instead pick the
+existing task whose code is most directly responsible for that behavior
+and reopen that one, explaining in "reason" that the actual problem is
+broader than that task's original successCriterion. Every reopenTasks
+entry must resolve to a task id that already appears in the task results
+above.
+
+CRITICAL — if the reason you're reopening a task is that its OWN stored
+successCriterion is factually wrong, not that the implementation fails
+it: set "correctedSuccessCriterion" on that reopenTasks entry to the
+corrected text. A criterion is factually wrong when it's objectively
+incompatible with a verified functional constraint — e.g. it names a
+specific key binding that provably collides with an existing control, so
+literally satisfying the criterion as written breaks something else no
+matter how it's implemented. This pipeline has lost real time to exactly
+this: a task's successCriterion said "bind KeyCode.A", which collides
+with WASD move-left; each Fixer who read the ORIGINAL criterion reverted
+a working Tab-based fix back to the broken A binding, and the next
+Critic/playtest caught it and changed it back — an unresolvable loop,
+because no Fixer has authority to rewrite a task's own stored
+successCriterion, only its implementation, and the stored text never
+changed. Do NOT set correctedSuccessCriterion for an ordinary reopen (a
+real bug, a missed detail, a quality issue) where the original criterion
+is still correct and only the code needs to change — reserve it for a
+proven factual error in the criterion text itself, since setting it
+loosely would let a reopen silently rewrite a task's requirements instead
+of fixing the implementation.
+
 Append one line to ${targetProjectPath}/.pipeline/progress-log.md
 summarizing your verdict. Also append a "start" line before you begin and
 a "done" line when you finish to
@@ -475,6 +538,18 @@ implement it. Every task MUST have:
   This pipeline has shipped an enemy that showed its attack pose the
   whole time it was chasing, with no visible difference until it actually
   landed a hit — don't repeat it.
+  HARD RULE, EXTENDED: whenever an action has an obvious physical impact
+  on the world (watering a plant, harvesting a crop, landing a hit,
+  walking across a distinct terrain type like mud or tall grass), its
+  description must name a concrete particle/VFX effect to accompany it
+  (a splash of droplets, a puff of dust, a burst of sparkles, impact
+  particles) — set needsArt: true for it, since the effect needs at
+  least a simple particle sprite/texture. Silence on an action with
+  obvious physical impact reads as unfinished the same way a missing
+  animation state does. Size the effect to the vision's own scope (a
+  cozy, minimal game needs a small, simple particle burst, not a
+  particle-heavy action-game VFX system) — the bar is "this specific
+  action has SOME visible physical feedback," not maximum spectacle.
 
 HARD RULE — shared state gets ONE owner, everyone else reads it: whenever
 more than one task will need the same underlying concept (world/level
@@ -491,6 +566,24 @@ movement boundary instead of deriving it from the ground it had just
 sized — two numbers for the same concept, invented independently, never
 reconciled. Do not let two tasks each invent their own version of the
 same fact.
+
+HARD RULE — never write a successCriterion that exact-matches a
+CONCRETE list/count of dynamic content a future milestone could expand:
+things like a named roster of characters ("dropdown options exactly
+match {NPC_A, NPC_B, NPC_C}"), a fixed count of locations, or any other
+content set this game's own scope implies will grow over time. This
+pipeline has shipped exactly this bug: a successCriterion literally
+named three placeholder test NPCs; a later milestone replaced them with
+a real 10+ resident roster, and the ORIGINAL literal successCriterion
+text — never a fact about the feature, just a snapshot of that day's
+placeholder data — then failed a re-verification of a feature that
+actually worked correctly, because nothing had authority to update the
+stored criterion text itself. Instead, phrase it against the LIVE
+source of truth, whatever it currently contains — "dropdown options
+match the current character roster, however many entries it has" — the
+same single-source-of-truth principle as the shared-state rule above,
+applied to how you phrase the criterion itself, not just to the code
+that will implement it.
 
 HARD RULE — camera follow: if the level has more than one room/screen the
 player moves between (not a single static room), one task MUST explicitly
@@ -735,6 +828,39 @@ the console indefinitely. This is a real bug this pipeline has shipped
 and failed to fix across multiple retries — check and fix the
 EventSystem's input module explicitly, don't assume the default is
 correct.
+
+CRITICAL — never hardcode a value that another component already owns
+and could change: if a number/position/rect you're about to write in
+code (or bake into a scene field) is derivable from an existing
+single-source-of-truth component (a bounds rect, another GameObject's
+real Collider2D bounds, another script's public property), read it live
+via a reference to that component (GetComponent, a public static
+Instance, or an equivalent lookup) instead of copying today's value in
+as a literal. This pipeline has shipped this exact bug repeatedly: a
+navigation graph authored its walkable-corridor node positions as
+hardcoded Vector2 literals instead of deriving them from the level's
+shared bounds component and each building's real Collider2D.bounds —
+every time the level's footprint changed, the graph silently went stale
+(nodes fell short of buildings, whole regions became unreachable) and
+had to be manually re-authored from scratch by whoever caught it, more
+than once. If you're about to write a number that "matches" another system's
+current state, stop and ask whether that other system could ever change
+it — if yes, read it from that system at runtime, don't duplicate it.
+
+CRITICAL — if you disable a component (or a whole GameObject) to isolate
+something while diagnosing or testing a fix, that is temporary
+scaffolding, not part of the fix: restore it to its correct enabled state
+before you save the scene and report done. Because other tasks in this
+pipeline can be touching the same scene around the same time, a component
+left disabled from an isolation step gets baked into the saved scene and
+silently inherited by whatever runs next against that scene — this has
+shipped repeatedly as the exact same bug (PerceptionCone/PerceptionLog/
+CircleCollider2D, then later NpcWaypointFollower, disabled on NPCs and
+blocking an unrelated task's test) even after being fixed once, because
+each fix's own isolation step re-disabled it and never turned it back on
+before saving. Before your final save_scene/report-done, re-check every
+component you toggled off during this task's own investigation and
+confirm it's back on (unless being off IS the actual intended fix).
 
 Use the funplay-unity MCP tools (search for "funplay" if you don't see
 them yet — you have full Editor control: create_game_object,
@@ -1146,6 +1272,19 @@ count (not just idle) — a single-keyframe clip standing in for a whole
 animated state is a picture swap, not real animation, and is a FAILURE
 even if the state transition itself works correctly.
 
+CRITICAL — if you disable a component (or a whole GameObject) to isolate
+something while testing, that is temporary scaffolding for your own
+investigation, not something that belongs in the saved scene: restore it
+to its correct enabled state before you finish, even if this task passed.
+Other tasks in this pipeline can be touching the same scene around the
+same time, and a component left disabled from your isolation step gets
+baked into the saved scene and silently inherited by whatever test runs
+next against it — this exact pattern (PerceptionCone/PerceptionLog/
+CircleCollider2D, then later NpcWaypointFollower, disabled on NPCs and
+blocking an unrelated task) has recurred more than once in this pipeline
+because a component toggled off to isolate one check was never toggled
+back on before the scene was saved.
+
 Use the funplay-unity MCP tools (search for "funplay" if you don't see
 them yet): enter_play_mode, simulate_key_press/simulate_key_combo for
 keyboard input, simulate_mouse_click/simulate_mouse_drag for mouse input,
@@ -1166,11 +1305,28 @@ timestamp from shell 'date -u +%Y-%m-%dT%H:%M:%SZ'>", "role": "tester",
 You are also the only role that keeps ${targetProjectPath}/.pipeline/backlog.json
 and ${targetProjectPath}/.pipeline/bugs.json current — after you decide
 pass/fail, do all of the following with your Read/Write tools:
-1. Read backlog.json, find the task with id "${task.id}", set its
-   "attempts" field to ${attempt}, and set its "status" to "done" if
-   this passed (leave it "todo" if it failed — the Director marks a
-   task "blocked" separately once all attempts are exhausted). Write
-   the file back.
+1. Read backlog.json, find the task with id "${task.id}". If it's
+   there: set its "attempts" field to ${attempt}, set its "status" to
+   "done" if this passed (leave it "todo" if it failed — the Director
+   marks a task "blocked" separately once all attempts are exhausted),
+   set its "successCriterion" field to exactly the text given to you
+   above ("${task.successCriterion}") if it differs from what's stored,
+   and write the file back.
+
+   CRITICAL — if "${task.id}" is NOT in this backlog.json (this happens
+   when the Director reopens a task from an EARLIER, already-completed
+   milestone — its task lives in that milestone's own historical
+   snapshot, not the current active backlog.json), do NOT skip the
+   update. Instead, find its actual home: read
+   ${targetProjectPath}/.pipeline/milestones/ (one subdirectory per
+   milestone id) and check each milestone's own backlog.json for a task
+   with this id, then apply the exact same attempts/status/
+   successCriterion update to that file and write IT back. Skipping
+   this because the task "isn't in backlog.json" leaves a corrected
+   successCriterion only fixed in this run's memory — a future resumed
+   run reads the stale historical snapshot and the same error can
+   resurface, which has actually happened in this pipeline (a
+   successCriterion correction that only patched the wrong copy).
 2. If it failed: read bugs.json, append a new object
    {"id": "bug-<short unique suffix>", "taskId": "${task.id}",
    "description": "<what's wrong>", "reproSteps": ["<step 1>", "..."],
@@ -1290,7 +1446,12 @@ specific problems rather than matching against examples:
   frame-to-frame motion, is not animation and reads as unfinished/novice
   work no matter how good the individual pose looks. This pipeline has
   shipped exactly this before; check for it every time, not just when it
-  happens to catch your eye.
+  happens to catch your eye. Also check actions with an obvious physical
+  impact (watering, harvesting, landing a hit, walking through mud/tall
+  grass) for a matching particle/VFX effect — a splash, a puff of dust,
+  an impact burst. An action like this with no particle feedback at all
+  reads as unfinished the same way a missing animation state does; flag
+  it the same way, sized against the vision's own scope.
 - Level / world design: is the layout sensible, is there confusing dead
   space or an unreachable area, does the difficulty/pacing match what the
   vision's priorities imply, is there anything a first-time player would
@@ -1336,7 +1497,17 @@ specific problems rather than matching against examples:
 - Vision fidelity, from a quality angle (not just literal coherence,
   which the Director separately checks): does what got built actually
   deliver the "hook" described in the vision, or does it technically
-  contain all the pieces while still missing the point?
+  contain all the pieces while still missing the point? Specifically
+  watch for a core mechanic that exists but feels hollow or isolated
+  from the ecosystem a real player would expect around it — a "plant a
+  seed" loop with only ever one kind of seed and no visible source for
+  it, an enemy encounter with only one enemy shape once the vision's
+  scope implies more, a reward/progress mechanic with nothing that
+  actually drops or unlocks. A mechanic that technically passes its
+  successCriterion while stopping short of this is a real, blocking-
+  eligible failure to deliver the vision, not a "later polish" item —
+  judge the expected depth against the vision's own stated
+  scope/priorities, the same way you judge decoration density.
 - Anything else you personally notice while actually playing that a
   demanding player or reviewer would call out, even if it doesn't fit
   neatly into any category above.
@@ -1415,6 +1586,31 @@ CRITICAL — this pipeline builds 2D games EXCLUSIVELY, no exceptions, even
 if the source document doesn't specify. Frame "identity" and every
 milestone's scope around a 2D perspective — never a 3D game.
 
+HARD RULE — think in complete systems, not isolated mechanics: for every
+core mechanic you put in scope, ask what it would take for a player to
+actually experience it as a coherent, complete system, not a token
+gesture that technically works but stops short of what a real game would
+need. Concretely, for each core mechanic ask: where does its
+resource/input come from, and is there more than one kind (a "plant a
+seed" loop needs an answer for where seeds come from and whether there
+is only ever one kind of seed); what range of outcomes or variety does
+the player actually encounter once the vision's scope is bigger than a
+single-encounter demo (a "fight an enemy" loop needs more than one enemy
+shape — different attacks, ranges, and objectives, not one copy-pasted
+threat); what does progress or reward look like (drops, upgrades,
+unlocks) if the vision implies persistent player growth at all. Don't
+stop at "the mechanic technically works" — ask what a player would
+expect next from it and make sure the roadmap actually answers that, the
+way a real shipped game would need to. Default to this depth whenever
+you are defining or extending a GAME's overall scope.
+
+EXCEPTION — this does NOT apply when the source document is itself a
+narrow, specific feature request against an existing game (e.g. "add an
+AoE attack ability," "add a new enemy type"), rather than a request to
+design or extend a game's overall scope. In that case, respect the
+narrow scope exactly as asked — do not inflate a specific feature
+request into a full system redesign.
+
 Write the vision to ${targetProjectPath}/.pipeline/vision.md and the full
 ordered roadmap to ${targetProjectPath}/.pipeline/roadmap.md (readable
 Markdown, using your Write tool). Also create
@@ -1467,9 +1663,28 @@ Step 2 (only when mode is "resume") — read
 ${targetProjectPath}/.pipeline/roadmap.md and
 ${targetProjectPath}/.pipeline/vision.md and reconstruct:
 - vision: identity/scope/priorities exactly as written in vision.md.
-- remainingMilestones: every milestone listed in roadmap.md whose id is
-  NOT marked "done" in milestone-status.json, in the SAME order roadmap.md
-  lists them (the "current" one, if any, comes first there already).
+- remainingMilestones: CRITICAL — milestone-status.json's own "milestones"
+  array (already read in Step 1) is the AUTHORITATIVE source for WHICH
+  milestone ids remain and in WHAT ORDER, not roadmap.md. Take every
+  milestone-status.json entry whose status is NOT "done", in the exact
+  order they appear there (the "current" one, if any, is already first).
+  roadmap.md can drift out of sync with milestone-status.json — it has
+  been observed with a stale, unrelated milestone list (even a different
+  id numbering) while milestone-status.json stayed correct — so NEVER let
+  roadmap.md's own list of ids or their order override or filter what
+  milestone-status.json says remains. Use roadmap.md only to fill in each
+  remaining milestone's "scope" and "dependsOn" fields (which
+  milestone-status.json doesn't store) by matching on id — if a remaining
+  id has no matching entry in roadmap.md at all (exactly the
+  drift/staleness case), do not skip it and do not substitute a
+  different milestone in its place: keep milestone-status.json's own
+  "description" as both description and scope, and dependsOn as an empty
+  array, rather than ever silently pulling in a milestone id that
+  milestone-status.json didn't list. Getting the FIRST remaining
+  milestone's id wrong here is what has caused this pipeline to
+  "resume" into designing an entirely different, unrelated milestone
+  from scratch while claiming to resume correctly — treat this
+  reconstruction as security-critical, not a best-effort merge.
 
 Step 3 (only when mode is "resume") — for EVERY milestone marked "done" in
 milestone-status.json, read
@@ -1803,6 +2018,23 @@ if (isResuming && Array.isArray(resumeState.doneMilestones)) {
   }
 }
 
+// Defensive correction: currentMilestoneSnapshot comes from a single,
+// targeted file read (resumeStatePrompt Step 4) and is far less prone to
+// drift than `milestones` (reconstructed from milestone-status.json's
+// list by the same agent call, Step 2) — if milestones[0] doesn't match
+// the snapshot's own id, trust the snapshot over the reconstructed list
+// and correct milestones[0] in place, rather than silently designing an
+// entirely unrelated milestone from scratch. This pipeline has shipped
+// exactly that bug: a correctly-loaded current-milestone snapshot sitting
+// unused while the remaining-milestones list pointed at a stale, wrong
+// milestone id first.
+if (isResuming && currentMilestoneSnapshot && milestones.length > 0 && milestones[0].id !== currentMilestoneSnapshot.id) {
+  log(`Resume check: milestones[0] ("${milestones[0].id}") doesn't match the loaded current-milestone snapshot ("${currentMilestoneSnapshot.id}") — trusting the snapshot and correcting the remaining-milestones list.`)
+  const stillListed = milestones.find(m => m.id === currentMilestoneSnapshot.id)
+  const corrected = stillListed ?? { id: currentMilestoneSnapshot.id, description: `(reconstructed from snapshot: ${currentMilestoneSnapshot.id})`, scope: '(reconstructed from snapshot — see its own gdd for real scope)', dependsOn: [] }
+  milestones = [corrected, ...milestones.filter(m => m.id !== currentMilestoneSnapshot.id)]
+}
+
 if (isResuming) {
   log(`Resume check: resuming — ${resumeState.doneMilestones?.length ?? 0} done milestone(s) loaded, ${milestones.length} remaining, ${currentMilestoneSnapshot ? `current milestone "${currentMilestoneSnapshot.id}" snapshot loaded (${currentMilestoneSnapshot.tasks.length} task(s))` : 'no usable current-milestone snapshot — it will be designed fresh'}.`)
 } else if (resumeState && resumeState.mode === 'resume') {
@@ -2010,15 +2242,55 @@ now, only what THIS MILESTONE ONLY says above: ${vision.scope}`,
     phase('Implementation')
     const reasonByTaskId = new Map(finalReview.reopenTasks.map(rt => [rt.taskId, rt.reason]))
     const reopenIds = new Set(reasonByTaskId.keys())
-    const tasksToReopen = currentTaskResults
+    // The Director can flag a task's OWN stored successCriterion as
+    // factually wrong (not just unmet) and supply the corrected text —
+    // apply it to the in-memory task now, before dispatch, so this round's
+    // Fixer/Tester (and the backlog.json bookkeeping the Tester does) work
+    // against the CORRECTED criterion, not the original broken one. Without
+    // this, a Fixer reading the task's original text can revert a correct
+    // fix back to the broken requirement every time it's touched again.
+    const correctedCriterionByTaskId = new Map(
+      finalReview.reopenTasks.filter(rt => rt.correctedSuccessCriterion).map(rt => [rt.taskId, rt.correctedSuccessCriterion])
+    )
+    for (const [taskId, corrected] of correctedCriterionByTaskId) {
+      log(`Milestone ${milestone.id} reopen round ${reopenRound + 1}: correcting ${taskId}'s stored successCriterion (Director determined the original was factually wrong) to: "${corrected}"`)
+    }
+    // finalReview can reopen a task from ANY earlier milestone, not just
+    // this one — allTaskResultsSoFar (accumulatedTaskResults +
+    // currentTaskResults, computed above) is where those live;
+    // currentTaskResults alone silently drops cross-milestone reopens.
+    const tasksToReopen = allTaskResultsSoFar
       .filter(r => r && reopenIds.has(r.task.id))
-      .map(r => ({ ...r.task, status: 'todo', attempts: 0 }))
+      .map(r => ({
+        ...r.task,
+        status: 'todo',
+        attempts: 0,
+        successCriterion: correctedCriterionByTaskId.get(r.task.id) ?? r.task.successCriterion,
+      }))
+    // The Director is instructed to only return real, existing task ids,
+    // but if it ever invents a free-text label instead (e.g. a description
+    // of the problem rather than an "M#-T#" id), that id matches nothing
+    // above and would otherwise vanish silently — the "bug" then just
+    // resurfaces every review with no one ever assigned to fix it. Surface
+    // it loudly instead of losing it.
+    const matchedIds = new Set(tasksToReopen.map(t => t.id))
+    const unmatchedIds = [...reopenIds].filter(id => !matchedIds.has(id))
+    if (unmatchedIds.length > 0) {
+      log(`WARNING — Milestone ${milestone.id} reopen round ${reopenRound + 1}: the Director's reopenTasks named ${unmatchedIds.length} id(s) that don't match any known task and will NOT be fixed this round: ${unmatchedIds.join(', ')} — reason(s) given: ${unmatchedIds.map(id => `"${reasonByTaskId.get(id)}"`).join('; ')}. This usually means the Director invented a free-text label instead of reusing a real task id.`)
+    }
     const freshResults = await pipeline(
       tasksToReopen,
       (task) => implementAndTestTask(task, args.targetProjectPath, vision, reasonByTaskId.get(task.id))
     )
     const freshById = new Map(freshResults.map(r => [r.task.id, r]))
     currentTaskResults = currentTaskResults.map(r => freshById.get(r.task.id) ?? r)
+    // A reopened task can belong to an earlier, already-"done" milestone —
+    // patch its accumulated result in place too, or the next playtest/
+    // critique pass still sees the stale pre-fix result.
+    for (let i = 0; i < accumulatedTaskResults.length; i++) {
+      const fresh = freshById.get(accumulatedTaskResults[i].task.id)
+      if (fresh) accumulatedTaskResults[i] = fresh
+    }
   }
 
   const blocked = currentTaskResults.filter(r => r && r.status === 'blocked')

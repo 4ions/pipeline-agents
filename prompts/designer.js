@@ -58,6 +58,18 @@ implement it. Every task MUST have:
   This pipeline has shipped an enemy that showed its attack pose the
   whole time it was chasing, with no visible difference until it actually
   landed a hit — don't repeat it.
+  HARD RULE, EXTENDED: whenever an action has an obvious physical impact
+  on the world (watering a plant, harvesting a crop, landing a hit,
+  walking across a distinct terrain type like mud or tall grass), its
+  description must name a concrete particle/VFX effect to accompany it
+  (a splash of droplets, a puff of dust, a burst of sparkles, impact
+  particles) — set needsArt: true for it, since the effect needs at
+  least a simple particle sprite/texture. Silence on an action with
+  obvious physical impact reads as unfinished the same way a missing
+  animation state does. Size the effect to the vision's own scope (a
+  cozy, minimal game needs a small, simple particle burst, not a
+  particle-heavy action-game VFX system) — the bar is "this specific
+  action has SOME visible physical feedback," not maximum spectacle.
 
 HARD RULE — shared state gets ONE owner, everyone else reads it: whenever
 more than one task will need the same underlying concept (world/level
@@ -74,6 +86,24 @@ movement boundary instead of deriving it from the ground it had just
 sized — two numbers for the same concept, invented independently, never
 reconciled. Do not let two tasks each invent their own version of the
 same fact.
+
+HARD RULE — never write a successCriterion that exact-matches a
+CONCRETE list/count of dynamic content a future milestone could expand:
+things like a named roster of characters ("dropdown options exactly
+match {NPC_A, NPC_B, NPC_C}"), a fixed count of locations, or any other
+content set this game's own scope implies will grow over time. This
+pipeline has shipped exactly this bug: a successCriterion literally
+named three placeholder test NPCs; a later milestone replaced them with
+a real 10+ resident roster, and the ORIGINAL literal successCriterion
+text — never a fact about the feature, just a snapshot of that day's
+placeholder data — then failed a re-verification of a feature that
+actually worked correctly, because nothing had authority to update the
+stored criterion text itself. Instead, phrase it against the LIVE
+source of truth, whatever it currently contains — "dropdown options
+match the current character roster, however many entries it has" — the
+same single-source-of-truth principle as the shared-state rule above,
+applied to how you phrase the criterion itself, not just to the code
+that will implement it.
 
 HARD RULE — camera follow: if the level has more than one room/screen the
 player moves between (not a single static room), one task MUST explicitly

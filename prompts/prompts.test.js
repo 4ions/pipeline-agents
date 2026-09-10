@@ -57,6 +57,34 @@ test('finalReviewPrompt requires a concrete per-task reason when reopening tasks
   assert.ok(result.includes('FRESH agent'))
 })
 
+test('finalReviewPrompt instructs the Director not to reopen a task the Critic just explicitly said it could not reproduce', () => {
+  const taskResults = [{ task: FIXTURE_TASK, status: 'done', attempts: 1, lastResult: { passed: true, evidence: 'it worked' } }]
+  const result = finalReviewPrompt(FIXTURE_VISION, 'a short GDD', taskResults, null, null, null, FIXTURE_TARGET_PATH)
+  assert.ok(result.includes("Critic's LATEST verdict overrides older evidence"))
+  assert.ok(/could\s+not\s+reproduce/.test(result))
+})
+
+test('finalReviewPrompt requires taskId to be a real existing task id, never an invented free-text label', () => {
+  const taskResults = [{ task: FIXTURE_TASK, status: 'done', attempts: 1, lastResult: { passed: true, evidence: 'it worked' } }]
+  const result = finalReviewPrompt(FIXTURE_VISION, 'a short GDD', taskResults, null, null, null, FIXTURE_TARGET_PATH)
+  assert.ok(result.includes('EXACT id'))
+  assert.ok(result.includes('player-collision fix'))
+  assert.ok(result.includes('taskId: null'))
+})
+
+test('finalReviewPrompt instructs the Director to correct a factually-wrong successCriterion rather than let it silently re-litigate', () => {
+  const taskResults = [{ task: FIXTURE_TASK, status: 'done', attempts: 1, lastResult: { passed: true, evidence: 'it worked' } }]
+  const result = finalReviewPrompt(FIXTURE_VISION, 'a short GDD', taskResults, null, null, null, FIXTURE_TARGET_PATH)
+  assert.ok(result.includes('correctedSuccessCriterion'))
+  assert.ok(result.includes('KeyCode.A'))
+})
+
+test('scenarioTestPrompt instructs the Tester to persist the (possibly corrected) successCriterion back to backlog.json', () => {
+  const result = scenarioTestPrompt(FIXTURE_TASK, 1, FIXTURE_TARGET_PATH)
+  assert.ok(result.includes('"successCriterion" field'))
+  assert.ok(result.includes(FIXTURE_TASK.successCriterion))
+})
+
 test('designPrompt includes the target project path', () => {
   const result = designPrompt(FIXTURE_VISION, FIXTURE_TARGET_PATH)
   assert.equal(typeof result, 'string')
@@ -81,6 +109,12 @@ test('designReviewPrompt includes the backlog tasks and vision', () => {
   assert.ok(result.includes(FIXTURE_VISION.identity))
 })
 
+test('designPrompt forbids exact-matching a successCriterion against dynamic content a later milestone could expand', () => {
+  const result = designPrompt(FIXTURE_VISION, FIXTURE_TARGET_PATH)
+  assert.ok(result.includes('NPC_A, NPC_B, NPC_C'))
+  assert.ok(result.includes('live source of truth') || result.toLowerCase().includes('however many'))
+})
+
 test('designPrompt requires atmosphere/decoration to be named explicitly for player-facing scenes', () => {
   const result = designPrompt(FIXTURE_VISION, FIXTURE_TARGET_PATH)
   assert.ok(result.includes('environmental richness'))
@@ -95,6 +129,19 @@ test('designReviewPrompt checks the backlog for named decoration on player-facin
   assert.ok(result.includes('reject the backlog'))
 })
 
+test('designPrompt requires a particle/VFX effect for actions with obvious physical impact', () => {
+  const result = designPrompt(FIXTURE_VISION, FIXTURE_TARGET_PATH)
+  assert.ok(result.includes('splash of droplets'))
+  assert.ok(result.includes('puff of dust'))
+  assert.ok(result.includes('needsArt: true'))
+})
+
+test('designReviewPrompt checks the backlog for named VFX on physical-impact actions', () => {
+  const backlog = { gdd: 'a short GDD', tasks: [FIXTURE_TASK, FIXTURE_ANIMATED_TASK] }
+  const result = designReviewPrompt(FIXTURE_VISION, backlog.gdd, backlog, FIXTURE_TARGET_PATH)
+  assert.ok(result.includes('particle/VFX effect'))
+})
+
 test('implementPrompt reads as programmer on attempt 1 and fixer on a later retry', () => {
   const programmerResult = implementPrompt(FIXTURE_TASK, 1, null, FIXTURE_TARGET_PATH)
   assert.equal(typeof programmerResult, 'string')
@@ -105,6 +152,30 @@ test('implementPrompt reads as programmer on attempt 1 and fixer on a later retr
   assert.equal(typeof fixerResult, 'string')
   assert.ok(fixerResult.length > 0)
   assert.ok(fixerResult.includes('fixer'))
+})
+
+test('implementPrompt forbids hardcoding a value another component already owns', () => {
+  const result = implementPrompt(FIXTURE_TASK, 1, null, FIXTURE_TARGET_PATH)
+  assert.ok(result.includes('never hardcode a value that another component already owns'))
+  assert.ok(result.includes('read it from that system at runtime'))
+})
+
+test('implementPrompt requires restoring components disabled for isolation before saving the scene', () => {
+  const result = implementPrompt(FIXTURE_TASK, 1, null, FIXTURE_TARGET_PATH)
+  assert.ok(result.includes('restore it to its correct enabled state'))
+  assert.ok(result.includes('NpcWaypointFollower'))
+})
+
+test('scenarioTestPrompt requires restoring components disabled for isolation before finishing', () => {
+  const result = scenarioTestPrompt(FIXTURE_TASK, 1, FIXTURE_TARGET_PATH)
+  assert.ok(/restore it\s+to its\s+correct enabled state/.test(result))
+  assert.ok(result.includes('NpcWaypointFollower'))
+})
+
+test('scenarioTestPrompt instructs updating the correct historical milestone snapshot when the task is not in the active backlog.json', () => {
+  const result = scenarioTestPrompt(FIXTURE_TASK, 1, FIXTURE_TARGET_PATH)
+  assert.ok(result.includes('.pipeline/milestones/'))
+  assert.ok(result.toLowerCase().includes('not') && result.includes('backlog.json'))
 })
 
 test('implementPrompt, artPrompt, animatedArtPrompt, animationReviewPrompt, and scenarioTestPrompt include the game vision when passed, and omit it when not', () => {
@@ -202,6 +273,20 @@ test('qualityCritiquePrompt treats a decoration-free player-facing space as a re
   assert.ok(result.includes('not a cosmetic nitpick'))
 })
 
+test('qualityCritiquePrompt checks physical-impact actions for a matching particle/VFX effect', () => {
+  const taskResults = [{ task: FIXTURE_TASK, status: 'done', attempts: 1, lastResult: { passed: true, evidence: 'it worked' } }]
+  const result = qualityCritiquePrompt(FIXTURE_VISION, 'a short GDD', taskResults, null, FIXTURE_TARGET_PATH)
+  assert.ok(result.toLowerCase().includes('particle'))
+  assert.ok(result.includes('puff of dust'))
+})
+
+test('qualityCritiquePrompt treats a hollow/isolated core mechanic as a real, blocking-eligible failure', () => {
+  const taskResults = [{ task: FIXTURE_TASK, status: 'done', attempts: 1, lastResult: { passed: true, evidence: 'it worked' } }]
+  const result = qualityCritiquePrompt(FIXTURE_VISION, 'a short GDD', taskResults, null, FIXTURE_TARGET_PATH)
+  assert.ok(result.includes('hollow or isolated'))
+  assert.ok(result.includes('blocking-\n  eligible') || result.includes('blocking-eligible'))
+})
+
 test('roadmapPrompt includes the source document and target path', () => {
   const doc = 'A cozy farming sim with seasons, NPC relationships, and a mine.'
   const result = roadmapPrompt(doc, FIXTURE_TARGET_PATH)
@@ -209,6 +294,14 @@ test('roadmapPrompt includes the source document and target path', () => {
   assert.ok(result.includes(doc))
   assert.ok(result.includes(FIXTURE_TARGET_PATH))
   assert.ok(result.includes('project-map.md'))
+})
+
+test('roadmapPrompt requires complete-systems thinking with a narrow-feature-request exception', () => {
+  const doc = 'A cozy farming sim with seasons, NPC relationships, and a mine.'
+  const result = roadmapPrompt(doc, FIXTURE_TARGET_PATH)
+  assert.ok(result.includes('think in complete systems'))
+  assert.ok(result.includes('EXCEPTION'))
+  assert.ok(result.includes('AoE attack ability'))
 })
 
 test('roadmapReviewPrompt includes the remaining roadmap and the milestone result, and explains the verdict options', () => {
@@ -241,6 +334,12 @@ test('resumeStatePrompt explains the per-milestone snapshot path and the top-lev
   assert.ok(result.includes('backlog.json'))
   assert.ok(result.includes('currentMilestoneSnapshot'))
   assert.ok(result.toLowerCase().includes('prefix'), 'must explain the "<id>-" task-id-prefix fallback check')
+})
+
+test('resumeStatePrompt derives remainingMilestones from milestone-status.json, not from roadmap.md, to survive roadmap.md drift', () => {
+  const result = resumeStatePrompt(FIXTURE_TARGET_PATH)
+  assert.ok(result.includes('AUTHORITATIVE source for WHICH'))
+  assert.ok(result.includes('NEVER let'))
 })
 
 const FIXTURE_MILESTONE = { id: 'M1', description: 'Farm scene & player movement', scope: 'a small top-down farm plot', dependsOn: [] }

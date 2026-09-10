@@ -92,6 +92,19 @@ count (not just idle) — a single-keyframe clip standing in for a whole
 animated state is a picture swap, not real animation, and is a FAILURE
 even if the state transition itself works correctly.
 
+CRITICAL — if you disable a component (or a whole GameObject) to isolate
+something while testing, that is temporary scaffolding for your own
+investigation, not something that belongs in the saved scene: restore it
+to its correct enabled state before you finish, even if this task passed.
+Other tasks in this pipeline can be touching the same scene around the
+same time, and a component left disabled from your isolation step gets
+baked into the saved scene and silently inherited by whatever test runs
+next against it — this exact pattern (PerceptionCone/PerceptionLog/
+CircleCollider2D, then later NpcWaypointFollower, disabled on NPCs and
+blocking an unrelated task) has recurred more than once in this pipeline
+because a component toggled off to isolate one check was never toggled
+back on before the scene was saved.
+
 Use the funplay-unity MCP tools (search for "funplay" if you don't see
 them yet): enter_play_mode, simulate_key_press/simulate_key_combo for
 keyboard input, simulate_mouse_click/simulate_mouse_drag for mouse input,
@@ -112,11 +125,28 @@ timestamp from shell 'date -u +%Y-%m-%dT%H:%M:%SZ'>", "role": "tester",
 You are also the only role that keeps ${targetProjectPath}/.pipeline/backlog.json
 and ${targetProjectPath}/.pipeline/bugs.json current — after you decide
 pass/fail, do all of the following with your Read/Write tools:
-1. Read backlog.json, find the task with id "${task.id}", set its
-   "attempts" field to ${attempt}, and set its "status" to "done" if
-   this passed (leave it "todo" if it failed — the Director marks a
-   task "blocked" separately once all attempts are exhausted). Write
-   the file back.
+1. Read backlog.json, find the task with id "${task.id}". If it's
+   there: set its "attempts" field to ${attempt}, set its "status" to
+   "done" if this passed (leave it "todo" if it failed — the Director
+   marks a task "blocked" separately once all attempts are exhausted),
+   set its "successCriterion" field to exactly the text given to you
+   above ("${task.successCriterion}") if it differs from what's stored,
+   and write the file back.
+
+   CRITICAL — if "${task.id}" is NOT in this backlog.json (this happens
+   when the Director reopens a task from an EARLIER, already-completed
+   milestone — its task lives in that milestone's own historical
+   snapshot, not the current active backlog.json), do NOT skip the
+   update. Instead, find its actual home: read
+   ${targetProjectPath}/.pipeline/milestones/ (one subdirectory per
+   milestone id) and check each milestone's own backlog.json for a task
+   with this id, then apply the exact same attempts/status/
+   successCriterion update to that file and write IT back. Skipping
+   this because the task "isn't in backlog.json" leaves a corrected
+   successCriterion only fixed in this run's memory — a future resumed
+   run reads the stale historical snapshot and the same error can
+   resurface, which has actually happened in this pipeline (a
+   successCriterion correction that only patched the wrong copy).
 2. If it failed: read bugs.json, append a new object
    {"id": "bug-<short unique suffix>", "taskId": "${task.id}",
    "description": "<what's wrong>", "reproSteps": ["<step 1>", "..."],
