@@ -8,11 +8,13 @@ import { artPrompt, animatedArtPrompt } from './artist.js'
 import { scenarioTestPrompt, fullPlaytestPrompt } from './tester.js'
 import { qualityCritiquePrompt } from './critic.js'
 import { roadmapPrompt, roadmapReviewPrompt, resumeStatePrompt, milestoneSnapshotPrompt } from './roadmap.js'
+import { launchTrainingPrompt, monitorConvergencePrompt, trainedModelVerificationPrompt } from './mlTraining.js'
 
 const FIXTURE_VISION = { identity: 'A test game', scope: 'test scope', priorities: ['fun', 'polish'] }
 const FIXTURE_TASK = { id: 'task-001', specialization: 'gameplay', description: 'Player can jump', successCriterion: 'Jump works', needsArt: false, needsAnimation: false, status: 'todo', attempts: 0 }
 const FIXTURE_ANIMATED_TASK = { ...FIXTURE_TASK, id: 'task-002', description: 'Door opens when key is collected', needsArt: true, needsAnimation: true }
 const FIXTURE_TARGET_PATH = '/tmp/fake-project'
+const FIXTURE_ML_LAUNCH_TASK = { ...FIXTURE_TASK, id: 'M13-T1', taskKind: 'ml-training-launch', description: 'Export a standalone build and launch ML-Agents training' }
 
 test('visionPrompt includes the game idea', () => {
   const gameIdea = 'a puzzle game about redirecting light beams'
@@ -367,4 +369,23 @@ test('milestoneSnapshotPrompt instructs updating milestone-status.json to "block
 
   const missingReview = milestoneSnapshotPrompt(FIXTURE_MILESTONE, taskResults, 'a short GDD', null, FIXTURE_TARGET_PATH)
   assert.ok(missingReview.includes('currentMilestoneId set to'), 'a missing final review must be treated the same as not-ready')
+})
+
+test('launchTrainingPrompt instructs exporting a standalone build (not the live Editor) and launching mlagents-learn with time_scale/no_graphics/num-envs/resume set explicitly', () => {
+  const result = launchTrainingPrompt(FIXTURE_ML_LAUNCH_TASK, FIXTURE_TARGET_PATH, FIXTURE_VISION)
+  assert.equal(typeof result, 'string')
+  assert.ok(result.includes('standalone build'))
+  assert.ok(result.includes('mlagents-learn'))
+  assert.ok(result.includes('--num-envs'))
+  assert.ok(result.includes('--resume'))
+  assert.ok(result.includes('no_graphics'))
+  assert.ok(result.includes('time_scale'))
+  assert.ok(result.includes('max_steps'))
+  assert.ok(result.includes(FIXTURE_TARGET_PATH))
+})
+
+test('launchTrainingPrompt instructs writing the run-id/logdir to a file the monitor task can find', () => {
+  const result = launchTrainingPrompt(FIXTURE_ML_LAUNCH_TASK, FIXTURE_TARGET_PATH, FIXTURE_VISION)
+  assert.ok(result.includes('.pipeline/ml-training/'))
+  assert.ok(result.includes(FIXTURE_ML_LAUNCH_TASK.id))
 })
