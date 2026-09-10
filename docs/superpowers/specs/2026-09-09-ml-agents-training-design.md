@@ -167,6 +167,18 @@ machinery. No `self_play` config block is needed.
   turns out to matter for this 2D scene — start with `--no-graphics`
   since nothing about this game needs visual rendering during training)
   as a background process, output redirected to a log file.
+- Speed up wall-clock training time: `mlagents-learn` already runs the
+  environment at an accelerated `Time.timeScale` by default via
+  `engine_settings.time_scale` in the trainer config (default 20x real
+  speed) — nobody watches training happen, so there's no reason to run
+  at 1x. Set `no_graphics: true` in the same `engine_settings` block
+  (equivalent to the `--no-graphics` CLI flag) to skip rendering
+  entirely, and consider raising `time_scale` further than the default
+  20 for this specific game — it's a simple 2D scene with lightweight
+  physics, not something that needs tight real-time coupling to
+  simulate correctly at higher multiples. Explicitly set these rather
+  than relying on defaults, so a future config change elsewhere doesn't
+  silently slow training back down.
 
 ### PPO hyperparameters — starting point
 
