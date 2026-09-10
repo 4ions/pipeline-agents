@@ -71,6 +71,20 @@ assumption. Do not treat this as solved by the citation in Sources
 below — it needs its own explicit confirmation step in the
 implementation plan.
 
+**This verification must also cover the spawn side, not just death.**
+A newly-spawned agent (via reproduction) also skips the normal
+`EndEpisode()` → `OnEpisodeBegin()` cycle. If agent instances are
+pooled/reused rather than freshly instantiated each time, whether
+`OnEpisodeBegin()` (and any per-episode internal state an Agent
+subclass might hold) fires correctly on re-enable is an open question
+of the same shape and same risk level as the death-side one.
+**Recommendation to sidestep this entirely**: don't pool agent
+instances — always `Instantiate()` a fresh GameObject for a new agent
+born via reproduction, and `Destroy()` (not disable-and-reuse) on
+death. This is simpler to reason about and verify than confirming
+pooled-object re-initialization semantics, at the cost of GC/allocation
+overhead that a small population of 5-10 agents makes negligible here.
+
 ### Observation space
 
 Per-agent, relative to a limited perception range (matching the
@@ -92,22 +106,44 @@ radius/angle, nothing outside it is observable):
   worth fighting/fleeing differently than an overwhelmingly bigger
   one), and a continuous ratio lets that emerge from training instead
   of being flattened away.
+
+  **Exact normalization formula (do not use linear min-max here)**: use
+  `tanh(log(power_other / power_self))`, not a raw or linearly-clipped
+  ratio. A raw ratio is unbounded (values like 50 sitting next to other
+  features scaled to [0,1]/[-1,1] would dominate early gradients
+  through the shared network trunk before other features get a fair
+  chance to matter), and an arbitrary clip ceiling would silently
+  flatten exactly the barely-bigger-vs-overwhelmingly-bigger distinction
+  this feature exists to preserve. The log-then-tanh form is naturally
+  symmetric under a predator/prey role swap (ratio=1 → 0; reciprocal
+  ratios map to negated values), stays bounded without clipping, and —
+  most importantly — puts the actual predator/prey decision boundary
+  exactly at 0, the representation most likely to let the network learn
+  a clean gate on this one feature instead of a smeared, low-confidence
+  region around parity.
 - Direction and distance to the nearest food resource, if any is within
   perception range (same zeroed-if-absent convention).
 
-Fixed-size zero-padded slots (the design above) are a legitimate
-starting pattern, but note for awareness: ML-Agents' `BufferSensor`
-(variable-length entity observations, order-invariant) is the more
-purpose-built tool for "up to N nearby entities" and avoids two real
-issues the fixed-slot design has — slot-reassignment churn (which
-physical slot an agent occupies can flip between steps as the
-nearest-4 ranking changes, adding noise the network has to learn to
-ignore) and the network having no reason to treat slot order as
-meaningless. Staying with fixed slots for the first implementation is
-fine (simpler, more predictable to debug), but if training struggles to
-converge on stable predator/prey behavior at all, revisiting the
-observation encoding via `BufferSensor` should be an early hypothesis,
-not a last resort.
+**Fixed slots vs. `BufferSensor` — raised from "fallback" to "consider
+building first".** Fixed-size zero-padded slots are a legitimate,
+simpler-to-debug starting pattern, but they have a specific, checkable
+failure signature worth naming precisely: a flat MLP has no structural
+prior that slot 1 and slot 3 should implement the same function of
+content, so it must learn that redundancy from data — and the concrete
+symptom this produces is oscillating/flickering movement at
+ranking-swap boundaries (when two similarly-distant agents flip which
+slot they occupy step-to-step, the two slot pathways weren't trained
+identically, so the policy's output can flicker even though the
+underlying world state barely changed). `BufferSensor` (variable-length
+entity observations, order-invariant) solves this structurally instead
+of requiring the network to learn it by brute force. Given the cost of
+discovering the churn problem only after a multi-hour training run
+looks mediocre, treat `BufferSensor` as cheap enough to build first
+rather than a fallback to revisit later — but if fixed slots are used
+for a first pass anyway, add a specific diagnostic (log action variance
+conditioned on ranking-swap events) so this failure mode is
+distinguishable from other causes of poor convergence during
+monitoring, rather than lumped into a generic "didn't converge."
 
 Research-backed rules to hold to when implementing this:
 - Normalize every component to [-1, +1] or [0, 1] — `normalizedValue =
@@ -121,6 +157,23 @@ Research-backed rules to hold to when implementing this:
   order — the empty-slot-zeroing above exists specifically to keep the
   vector size fixed even when fewer than N agents are in range.
 - Include only what's relevant to the decision — no extraneous fields.
+
+**Memory/recurrence — deliberately not in v1.** A purely reactive
+(memory-less) policy will lose track of a target that briefly exits
+perception range and likely revert to foraging rather than something
+like "search toward last-known heading." This is a real limitation, but
+not one to solve upfront: this game's non-episodic agent lifecycle (no
+`EndEpisode()`, instances destroyed/respawned independently — see Agent
+lifecycle above) means a recurrent hidden state's reset-on-respawn
+semantics would be another manual correctness burden of the same shape
+as the EndEpisode terminal-transition risk already flagged — getting it
+wrong (stale hidden state carried into a newly-spawned, unrelated agent
+instance) is a subtle, silent corruption. If Tester verification later
+shows hunting behavior specifically "loses track / gives up too
+easily," reach for `Stacked Vectors` (2-3 frames) first — same
+implementation cost as widening the observation vector, none of
+recurrence's sequence-training or hidden-state-lifecycle complexity —
+before escalating to an LSTM.
 
 ### Action space
 
@@ -176,7 +229,17 @@ tuned within these research-backed constraints:
   higher-power agent enters this agent's immediate catch/threat range,
   and the evasion reward pays out once, only if the agent subsequently
   leaves that range alive — not on every step the encounter is
-  ongoing.
+  ongoing. **Add hysteresis around the range boundary itself**, or this
+  reappears at finer grain: an agent hovering exactly at the edge of a
+  predator's catch range can otherwise farm repeated payouts by rapidly
+  toggling in/out, each flicker counting as a new "encounter" by the
+  letter of the definition above. Require either (a) the agent's
+  distance to exceed the catch range by some margin (not merely `>`
+  catch range) before the encounter is considered ended, (b) a minimum
+  in-range dwell time before an encounter counts as having happened at
+  all, or (c) a cooldown between evasion payouts for the same pair of
+  agents — pick one before implementing, don't leave the boundary
+  condition as a bare `>`/`<` comparison.
 
 Concrete starting shape (tune during training, not fixed in stone):
 - Small positive on eating the food resource.
@@ -253,6 +316,22 @@ To actually counter the cold-start/degenerate-equilibrium risk, add:
   size, food density, spawn power distribution) for robustness — not
   optional polish, standard practice for this class of environment,
   and currently entirely absent from this design.
+  **How this composes with the curriculum ramp matters and must be
+  specified, not left implicit**: with PPO's on-policy buffer
+  continuously refreshed (`buffer_size` 10,240), once the curriculum
+  reaches its final, sparse-encounter target lesson, high-density
+  experience from earlier lessons ages out of the buffer within a
+  handful of updates — meaning the policy spends its LAST, deployment-
+  determining stretch of training almost exclusively on the
+  low-encounter-rate regime this design already identifies as prone to
+  the degenerate forager equilibrium. A one-way ramp risks the trained
+  network "forgetting" hunting/evading behavior right before it's
+  frozen for deployment. Prevent this explicitly: make randomization
+  ranges widen as curriculum stages progress (later-stage ranges are
+  supersets of earlier ones, never fully replacing them), and/or
+  permanently pin a fraction of the parallel `--num-envs` instances to
+  elevated-encounter-rate configurations for the ENTIRE run, not just
+  early lessons.
 - **Role-balance telemetry**, fed to the training-milestone's own
   monitoring step (see Convergence monitoring below): custom
   `StatsRecorder` counters for hunt attempts vs. successes, and the
@@ -306,7 +385,19 @@ To actually counter the cold-start/degenerate-equilibrium risk, add:
   this is likely the bigger lever (more than `time_scale` alone) for
   both wall-clock speed and, just as importantly, experience diversity
   for a co-adapting population (more simultaneous independent instances
-  decorrelates the batch). Bound N by available CPU cores, not an
+  decorrelates the batch). There's a second, independent reason
+  `--num-envs` matters specifically for this game: hunting/evading
+  encounters are rare events, so even with reward RATE perfectly
+  balanced (per the achievability point above), any given PPO
+  minibatch will contain very few encounter-derived transitions purely
+  because of how infrequent encounters are — meaning gradient signal
+  for hunting/evading has inherently higher variance per update than
+  foraging's, independent of magnitude or achievability tuning. More
+  parallel envs directly raises the odds a given batch actually
+  contains encounter transitions. If wall-clock budget forces a
+  tradeoff between more `--num-envs` and a longer `time_horizon`,
+  favor more envs — it addresses this variance problem directly, which
+  `time_horizon` alone doesn't. Bound N by available CPU cores, not an
   arbitrarily large number — verify actual core count on the training
   machine before picking a value rather than guessing.
 - Use `mlagents-learn --resume --run-id=<same id>` to continue an
@@ -339,13 +430,26 @@ values.)
 | epsilon | 0.2 | 0.1-0.3 | Lower = more stable but slower. |
 | num_epoch | 3 | 3-10 | More epochs OK with a bigger batch size. |
 | time_horizon | 128-256 (not 64) | 32-2,048 | Should span whatever behavior sequence actually matters. Given this design rewards RESULTS (a completed catch, a completed evasion, a reproduction), not proxies, those sequences plausibly span well beyond 64 decision steps — especially since predator and prey share the same policy/skill level, making a quick catch rare. Start higher than ML-Agents' generic default given this specific reward design; treat 64 as too short here, not a safe default. |
+| max_steps | **must be set explicitly — do not leave at the mlagents-learn default of 500,000** | tens of millions (see note) | This spec's own Convergence Monitoring section states comparable ML-Agents multi-agent tasks commonly need tens of millions of steps before a PLATEAU verdict is even meaningful — the default 500,000 is two orders of magnitude short of that and would hard-exit training before the convergence script's minimum-step floor could ever fire. Research the actual step count needed for a comparable multi-agent ML-Agents example (Soccer/Tennis-scale, not a single-agent locomotion example) and set `max_steps` with comfortable headroom above the convergence script's minimum-step floor — the floor is meaningless if the trainer process exits before reaching it. |
 
 Also specify the **Decision Requester interval** explicitly in the
 implementation (how many physics/fixed-update steps pass between the
 agent's decisions) — `time_horizon` is measured in decision steps, so
 it only means a concrete amount of real time once this is fixed. This
 spec doesn't fix a number, but the implementation plan must pick one
-and state it, not leave it as whatever Unity defaults to.
+and state it, not leave it as whatever Unity defaults to. `summary_freq`
+and `checkpoint_interval` are similarly unset here — pick these
+together with the Convergence Monitoring section's rolling-window size
+(N) and consecutive-check count (M) below, since those are only
+meaningful once the real-time spacing between summaries is fixed, not
+independently.
+
+Also set `network_settings.normalize: false` deliberately (not by
+omission) — this design already manually bounds every observation
+component to [0,1]/[-1,1]/[-1,1] via explicit formulas above; ML-Agents'
+own running observation normalization stacked on top of already-bounded
+inputs is a known, if usually minor, source of early-training
+instability, and there's no reason to pay that risk here.
 
 ## Convergence monitoring (new capability) — REVISED
 
@@ -366,17 +470,51 @@ converged can be indistinguishable on that one metric alone.
 judgment layered on top of its output, not Claude reasoning over raw
 numbers directly.
 
-1. A companion script (not an LLM call) parses the training log on
-   each check and computes, over a rolling window of recent summary
+1. **Data source — read TensorBoard event files, not console stdout.**
+   ML-Agents' default scalars (Mean Reward, Std of Reward, episode
+   length) appear in both the console log and TensorBoard event files,
+   but custom `StatsRecorder` values (the role-balance telemetry this
+   design depends on) are only reliably written to the TensorBoard
+   event files (`events.out.tfevents.*`), not plain console output. A
+   regex-over-stdout parser — the natural reading of an earlier draft
+   of this section — would silently never see the role-balance signal
+   the PLATEAU-DEGENERATE gate below depends on. Build the companion
+   script (not an LLM call) around a TensorBoard event-file reader
+   (e.g., Python's `tensorboard.backend.event_processing.event_accumulator`,
+   or an equivalent library) reading ALL needed metrics from that one
+   source — Mean Reward, Std of Reward, episode length, and the
+   role-balance counters — rather than splitting sources. Event files
+   flush asynchronously (not line-by-line like a log), so the script's
+   polling needs to tolerate a metric not having a new data point yet
+   on a given check, not treat that as a stall.
+2. The script computes, over a rolling window of recent summary
    intervals: the rolling mean and standard deviation of Mean Reward,
    the trend of Std of Reward (a cheap divergence tripwire — a spiking
-   Std often precedes a visible Mean Reward crash), and mean episode
+   Std often precedes a visible Mean Reward crash), mean episode
    length (a collapsing episode length — agents dying near-instantly —
    is often an earlier and clearer failure signal than Mean Reward
-   itself). It also reads the role-balance telemetry counters (hunt
+   itself), and the role-balance telemetry counters (hunt
    attempts/successes, forage/flee/engage step fractions) introduced
-   above.
-2. The script applies explicit, numeric rules, not prose judgment:
+   above. Also segment action-output variance/entropy by power-ratio
+   bucket (e.g., clearly-predator / near-parity / clearly-prey) if
+   feasible — a policy that stays generically low-confidence for
+   clearly-lopsided ratios (not just near true parity, where some
+   blended behavior is arguably correct) is the observable symptom of
+   the "smeared decision boundary" failure mode, and this reuses
+   telemetry infrastructure this design is already building rather than
+   requiring new instrumentation.
+3. **Curriculum lesson transitions must be visible to this script, not
+   silently absorbed into the rolling window.** A lesson change
+   legitimately shifts the reward regime (a harder lesson causing a
+   temporary dip is expected, not degeneration) — without lesson
+   boundaries marked in the log stream, the DIVERGE condition (a drop
+   from rolling peak) cannot tell a real collapse apart from an
+   intentional difficulty increase. Tag each lesson transition in the
+   telemetry stream and either reset the rolling-window baseline at
+   each transition, or make the hysteresis window lesson-aware
+   (require enough post-transition history before DIVERGE/PLATEAU can
+   fire again).
+4. The script applies explicit, numeric rules, not prose judgment:
    - A hard MINIMUM training-step floor before a PLATEAU verdict is
      even permitted, regardless of what the curve looks like before
      that point (the exact floor is an implementation-time decision,
@@ -397,7 +535,7 @@ numbers directly.
      PLATEAU-as-success — it should report something like
      PLATEAU-DEGENERATE, distinct from a genuine converged predator/prey
      equilibrium, since these look identical on Mean Reward alone.
-3. The Claude agent consumes this script's STRUCTURED verdict
+5. The Claude agent consumes this script's STRUCTURED verdict
    (CONTINUE / PLATEAU / PLATEAU-DEGENERATE / DIVERGE, plus the
    supporting numbers) rather than raw log text — its job is deciding
    what to DO with a verdict (proceed to integration, retry with
@@ -412,7 +550,16 @@ deterministic tool's verdict."
 
 ## Model integration & verification
 
-Once training stops, the resulting `.onnx` is copied into the Unity
+Once training stops, select which checkpoint to deploy using the
+role-balance telemetry (hunt attempts/successes, forage/flee/engage
+fractions), not simply "whichever checkpoint was saved last" — per the
+curriculum/randomization risk above, the final checkpoint could
+plausibly correspond to a moment where hunting/evading signal had
+already started thinning out even though Mean Reward looks fine. Pick
+the checkpoint whose telemetry shows the most balanced, non-degenerate
+role distribution, not necessarily the highest-numbered one.
+
+The resulting `.onnx` is copied into the Unity
 project's `Assets/`, assigned to the trained agents' `Behavior
 Parameters` component in Inference mode. The existing Tester/Critic
 roles then verify it with the SAME rigor already established elsewhere
@@ -447,6 +594,19 @@ flee, and seek food sensibly when actually played against, not just
   milestone has worked against the live Editor) — the exact MCP/build
   tooling to trigger a build export headlessly hasn't been verified
   against this project's actual MCP tool surface yet.
+- **Curriculum concreteness**: the curriculum section names the
+  mechanism (`EnvironmentParameters` ramp, completion threshold,
+  superset randomization ranges) but not the exact stage count, the
+  specific parameter values per stage, or which telemetry metric gates
+  advancement to the next stage — this can't be directly transcribed
+  into a curriculum YAML without a design decision the implementation
+  plan still needs to make, not something resolvable on paper here.
+- **`max_steps` and the convergence script's minimum-step floor are
+  each independently unset** (both explicitly require research into a
+  comparable ML-Agents multi-agent example's real step count) — treat
+  picking these as one coupled decision in the implementation plan, not
+  two independent guesses, since the floor is meaningless if `max_steps`
+  doesn't comfortably exceed it.
 
 ## Sources consulted
 
@@ -456,3 +616,5 @@ flee, and seek food sensibly when actually played against, not just
 - Predator/prey RL reward-shaping examples (search-aggregated, multiple sources) — concrete reward magnitudes and the shared-catch credit-division gotcha.
 - ML-Agents GitHub issues/docs on individual agent death/respawn vs. `EndEpisode()` semantics in multi-agent environments.
 - Internal expert review (subagent, senior RL/Unity ML-Agents engineer persona) of the first draft of this spec — surfaced the convergence-monitoring redesign, the reward-frequency/degenerate-equilibrium risk, the EndEpisode terminal-transition verification requirement, the time_horizon revision, the discrete-evasion-event fix, and the missing --num-envs/--resume/grace-period/escalation-path items, all incorporated above.
+- Internal expert re-review (subagent, same persona) of the revised spec — surfaced the missing `max_steps` value, the TensorBoard-vs-console-log data-source ambiguity for custom telemetry, the curriculum/convergence-monitor lesson-transition disconnect, the finer-grained evasion-boundary farming exploit, and the spawn-side EndEpisode/pooling gap, all incorporated above.
+- Internal expert review (subagent, senior deep-learning/training-dynamics engineer persona) of the revised spec — surfaced the missing power-ratio normalization formula (log-ratio + tanh), the one-way-curriculum forgetting risk and its fix (superset randomization ranges, pinned high-encounter envs, telemetry-based checkpoint selection), the case for prioritizing `BufferSensor` over fixed slots, the second independent reason `--num-envs` matters (encounter-transition batch scarcity), the power-ratio-bucketed entropy diagnostic, and the reasoning for deliberately deferring recurrence/memory to a later iteration, all incorporated above.
