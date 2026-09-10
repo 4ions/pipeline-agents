@@ -71,6 +71,11 @@ Check, specifically:
   kind of place the vision describes — reject the backlog for this
   specifically, the same way you'd reject a missing camera-follow task,
   don't wave it through as a later polish concern.
+- For every task whose action has an obvious physical impact (watering,
+  harvesting, landing a hit, walking through mud/tall grass), does its
+  description name a concrete particle/VFX effect (splash, dust puff,
+  impact burst), or is that left implicit? Reject the backlog for this
+  specifically if it's missing, the same way as missing decoration.
 - Is anything missing that a reasonable player would expect given the
   vision (e.g. a vision that promises combat but the backlog never adds
   an enemy)?
@@ -151,6 +156,23 @@ Full playtest result: ${playtestResult ? JSON.stringify(playtestResult) : 'MISSI
 ${directorDecisions ? `Earlier escalation decisions you already made on blocked tasks: ${JSON.stringify(directorDecisions)}` : 'No tasks were blocked.'}
 ${qualityCritique ? `The Quality Critic — a separate, zero-tolerance reviewer whose only job is to catch mediocre/half-finished work — gave this verdict after the polish-fix rounds ran their course: ${JSON.stringify(qualityCritique)}. Any remaining "blocking" issue in this critique means the game is NOT ready, no exceptions — treat the Critic's verdict as authoritative on quality, the same way you treat the playtest as authoritative on functionality.` : 'The Quality Critic did not return a result — treat quality as unverified, not as passing.'}
 
+CRITICAL — the Critic's LATEST verdict overrides older evidence about the
+SAME symptom: "Task results" above is the full accumulated history,
+including earlier rounds' evidence text written before a bug was fixed —
+that older text can still describe a symptom (e.g. "clipping," "wrong
+color," "missing state") that a later fix already resolved. If the
+Quality Critic's most recent pass explicitly states it could not
+reproduce a specific issue, or reports zero blocking issues where an
+earlier round once found one, treat THAT as the current, authoritative
+state of that specific issue — do not reopen a task for it by pattern-
+matching keywords in older, superseded task-result evidence. This
+pipeline has reopened a task for a bug the Critic had just explicitly
+reported as not reproducible in the same review, which wastes a reopen
+round doing nothing (the Fixer has no live bug to find) and can exhaust
+the reopen budget before a real remaining issue gets its turn. Only
+reopen a task for a symptom the CURRENT round's Critic pass (or your own
+fresh read of the current playtest result) actually still supports.
+
 Check whether what was actually built still matches the original vision
 (not just whether it technically works). This pipeline builds 2D games
 exclusively — if any task result's evidence suggests 3D primitives, 3D
@@ -185,6 +207,43 @@ the same reopened task to bounce through multiple rounds without the
 actual complaint ever being addressed, because the Fixer had nothing
 concrete to act on and just re-verified the task's original, already-
 passing success criterion instead.
+
+CRITICAL — taskId must be the EXACT id of a real task from the task
+results you were given above (e.g. "M4-T4"), copied verbatim — never a
+free-text label describing the problem (e.g. "player-collision fix" is
+NOT a valid taskId). The reopen mechanism dispatches work by looking up
+this exact id; an invented label matches nothing and the fix silently
+never happens — the bug just resurfaces every review with no one ever
+assigned to it. If a real bug doesn't cleanly belong to any single
+existing task (the Quality Critic may have flagged it with taskId: null
+for exactly this reason), do NOT invent a label — instead pick the
+existing task whose code is most directly responsible for that behavior
+and reopen that one, explaining in "reason" that the actual problem is
+broader than that task's original successCriterion. Every reopenTasks
+entry must resolve to a task id that already appears in the task results
+above.
+
+CRITICAL — if the reason you're reopening a task is that its OWN stored
+successCriterion is factually wrong, not that the implementation fails
+it: set "correctedSuccessCriterion" on that reopenTasks entry to the
+corrected text. A criterion is factually wrong when it's objectively
+incompatible with a verified functional constraint — e.g. it names a
+specific key binding that provably collides with an existing control, so
+literally satisfying the criterion as written breaks something else no
+matter how it's implemented. This pipeline has lost real time to exactly
+this: a task's successCriterion said "bind KeyCode.A", which collides
+with WASD move-left; each Fixer who read the ORIGINAL criterion reverted
+a working Tab-based fix back to the broken A binding, and the next
+Critic/playtest caught it and changed it back — an unresolvable loop,
+because no Fixer has authority to rewrite a task's own stored
+successCriterion, only its implementation, and the stored text never
+changed. Do NOT set correctedSuccessCriterion for an ordinary reopen (a
+real bug, a missed detail, a quality issue) where the original criterion
+is still correct and only the code needs to change — reserve it for a
+proven factual error in the criterion text itself, since setting it
+loosely would let a reopen silently rewrite a task's requirements instead
+of fixing the implementation.
+
 Append one line to ${targetProjectPath}/.pipeline/progress-log.md
 summarizing your verdict. Also append a "start" line before you begin and
 a "done" line when you finish to

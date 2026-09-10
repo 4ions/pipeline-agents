@@ -186,6 +186,39 @@ and failed to fix across multiple retries — check and fix the
 EventSystem's input module explicitly, don't assume the default is
 correct.
 
+CRITICAL — never hardcode a value that another component already owns
+and could change: if a number/position/rect you're about to write in
+code (or bake into a scene field) is derivable from an existing
+single-source-of-truth component (a bounds rect, another GameObject's
+real Collider2D bounds, another script's public property), read it live
+via a reference to that component (GetComponent, a public static
+Instance, or an equivalent lookup) instead of copying today's value in
+as a literal. This pipeline has shipped this exact bug repeatedly: a
+navigation graph authored its walkable-corridor node positions as
+hardcoded Vector2 literals instead of deriving them from the level's
+shared bounds component and each building's real Collider2D.bounds —
+every time the level's footprint changed, the graph silently went stale
+(nodes fell short of buildings, whole regions became unreachable) and
+had to be manually re-authored from scratch by whoever caught it, more
+than once. If you're about to write a number that "matches" another system's
+current state, stop and ask whether that other system could ever change
+it — if yes, read it from that system at runtime, don't duplicate it.
+
+CRITICAL — if you disable a component (or a whole GameObject) to isolate
+something while diagnosing or testing a fix, that is temporary
+scaffolding, not part of the fix: restore it to its correct enabled state
+before you save the scene and report done. Because other tasks in this
+pipeline can be touching the same scene around the same time, a component
+left disabled from an isolation step gets baked into the saved scene and
+silently inherited by whatever runs next against that scene — this has
+shipped repeatedly as the exact same bug (PerceptionCone/PerceptionLog/
+CircleCollider2D, then later NpcWaypointFollower, disabled on NPCs and
+blocking an unrelated task's test) even after being fixed once, because
+each fix's own isolation step re-disabled it and never turned it back on
+before saving. Before your final save_scene/report-done, re-check every
+component you toggled off during this task's own investigation and
+confirm it's back on (unless being off IS the actual intended fix).
+
 Use the funplay-unity MCP tools (search for "funplay" if you don't see
 them yet — you have full Editor control: create_game_object,
 add_component, set_component_property/set_component_properties,

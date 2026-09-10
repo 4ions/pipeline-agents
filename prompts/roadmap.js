@@ -34,6 +34,31 @@ CRITICAL — this pipeline builds 2D games EXCLUSIVELY, no exceptions, even
 if the source document doesn't specify. Frame "identity" and every
 milestone's scope around a 2D perspective — never a 3D game.
 
+HARD RULE — think in complete systems, not isolated mechanics: for every
+core mechanic you put in scope, ask what it would take for a player to
+actually experience it as a coherent, complete system, not a token
+gesture that technically works but stops short of what a real game would
+need. Concretely, for each core mechanic ask: where does its
+resource/input come from, and is there more than one kind (a "plant a
+seed" loop needs an answer for where seeds come from and whether there
+is only ever one kind of seed); what range of outcomes or variety does
+the player actually encounter once the vision's scope is bigger than a
+single-encounter demo (a "fight an enemy" loop needs more than one enemy
+shape — different attacks, ranges, and objectives, not one copy-pasted
+threat); what does progress or reward look like (drops, upgrades,
+unlocks) if the vision implies persistent player growth at all. Don't
+stop at "the mechanic technically works" — ask what a player would
+expect next from it and make sure the roadmap actually answers that, the
+way a real shipped game would need to. Default to this depth whenever
+you are defining or extending a GAME's overall scope.
+
+EXCEPTION — this does NOT apply when the source document is itself a
+narrow, specific feature request against an existing game (e.g. "add an
+AoE attack ability," "add a new enemy type"), rather than a request to
+design or extend a game's overall scope. In that case, respect the
+narrow scope exactly as asked — do not inflate a specific feature
+request into a full system redesign.
+
 Write the vision to ${targetProjectPath}/.pipeline/vision.md and the full
 ordered roadmap to ${targetProjectPath}/.pipeline/roadmap.md (readable
 Markdown, using your Write tool). Also create
@@ -86,9 +111,28 @@ Step 2 (only when mode is "resume") — read
 ${targetProjectPath}/.pipeline/roadmap.md and
 ${targetProjectPath}/.pipeline/vision.md and reconstruct:
 - vision: identity/scope/priorities exactly as written in vision.md.
-- remainingMilestones: every milestone listed in roadmap.md whose id is
-  NOT marked "done" in milestone-status.json, in the SAME order roadmap.md
-  lists them (the "current" one, if any, comes first there already).
+- remainingMilestones: CRITICAL — milestone-status.json's own "milestones"
+  array (already read in Step 1) is the AUTHORITATIVE source for WHICH
+  milestone ids remain and in WHAT ORDER, not roadmap.md. Take every
+  milestone-status.json entry whose status is NOT "done", in the exact
+  order they appear there (the "current" one, if any, is already first).
+  roadmap.md can drift out of sync with milestone-status.json — it has
+  been observed with a stale, unrelated milestone list (even a different
+  id numbering) while milestone-status.json stayed correct — so NEVER let
+  roadmap.md's own list of ids or their order override or filter what
+  milestone-status.json says remains. Use roadmap.md only to fill in each
+  remaining milestone's "scope" and "dependsOn" fields (which
+  milestone-status.json doesn't store) by matching on id — if a remaining
+  id has no matching entry in roadmap.md at all (exactly the
+  drift/staleness case), do not skip it and do not substitute a
+  different milestone in its place: keep milestone-status.json's own
+  "description" as both description and scope, and dependsOn as an empty
+  array, rather than ever silently pulling in a milestone id that
+  milestone-status.json didn't list. Getting the FIRST remaining
+  milestone's id wrong here is what has caused this pipeline to
+  "resume" into designing an entirely different, unrelated milestone
+  from scratch while claiming to resume correctly — treat this
+  reconstruction as security-critical, not a best-effort merge.
 
 Step 3 (only when mode is "resume") — for EVERY milestone marked "done" in
 milestone-status.json, read

@@ -167,6 +167,23 @@ if (isResuming && Array.isArray(resumeState.doneMilestones)) {
   }
 }
 
+// Defensive correction: currentMilestoneSnapshot comes from a single,
+// targeted file read (resumeStatePrompt Step 4) and is far less prone to
+// drift than `milestones` (reconstructed from milestone-status.json's
+// list by the same agent call, Step 2) — if milestones[0] doesn't match
+// the snapshot's own id, trust the snapshot over the reconstructed list
+// and correct milestones[0] in place, rather than silently designing an
+// entirely unrelated milestone from scratch. This pipeline has shipped
+// exactly that bug: a correctly-loaded current-milestone snapshot sitting
+// unused while the remaining-milestones list pointed at a stale, wrong
+// milestone id first.
+if (isResuming && currentMilestoneSnapshot && milestones.length > 0 && milestones[0].id !== currentMilestoneSnapshot.id) {
+  log(`Resume check: milestones[0] ("${milestones[0].id}") doesn't match the loaded current-milestone snapshot ("${currentMilestoneSnapshot.id}") — trusting the snapshot and correcting the remaining-milestones list.`)
+  const stillListed = milestones.find(m => m.id === currentMilestoneSnapshot.id)
+  const corrected = stillListed ?? { id: currentMilestoneSnapshot.id, description: `(reconstructed from snapshot: ${currentMilestoneSnapshot.id})`, scope: '(reconstructed from snapshot — see its own gdd for real scope)', dependsOn: [] }
+  milestones = [corrected, ...milestones.filter(m => m.id !== currentMilestoneSnapshot.id)]
+}
+
 if (isResuming) {
   log(`Resume check: resuming — ${resumeState.doneMilestones?.length ?? 0} done milestone(s) loaded, ${milestones.length} remaining, ${currentMilestoneSnapshot ? `current milestone "${currentMilestoneSnapshot.id}" snapshot loaded (${currentMilestoneSnapshot.tasks.length} task(s))` : 'no usable current-milestone snapshot — it will be designed fresh'}.`)
 } else if (resumeState && resumeState.mode === 'resume') {
@@ -374,15 +391,55 @@ now, only what THIS MILESTONE ONLY says above: ${vision.scope}`,
     phase('Implementation')
     const reasonByTaskId = new Map(finalReview.reopenTasks.map(rt => [rt.taskId, rt.reason]))
     const reopenIds = new Set(reasonByTaskId.keys())
-    const tasksToReopen = currentTaskResults
+    // The Director can flag a task's OWN stored successCriterion as
+    // factually wrong (not just unmet) and supply the corrected text —
+    // apply it to the in-memory task now, before dispatch, so this round's
+    // Fixer/Tester (and the backlog.json bookkeeping the Tester does) work
+    // against the CORRECTED criterion, not the original broken one. Without
+    // this, a Fixer reading the task's original text can revert a correct
+    // fix back to the broken requirement every time it's touched again.
+    const correctedCriterionByTaskId = new Map(
+      finalReview.reopenTasks.filter(rt => rt.correctedSuccessCriterion).map(rt => [rt.taskId, rt.correctedSuccessCriterion])
+    )
+    for (const [taskId, corrected] of correctedCriterionByTaskId) {
+      log(`Milestone ${milestone.id} reopen round ${reopenRound + 1}: correcting ${taskId}'s stored successCriterion (Director determined the original was factually wrong) to: "${corrected}"`)
+    }
+    // finalReview can reopen a task from ANY earlier milestone, not just
+    // this one — allTaskResultsSoFar (accumulatedTaskResults +
+    // currentTaskResults, computed above) is where those live;
+    // currentTaskResults alone silently drops cross-milestone reopens.
+    const tasksToReopen = allTaskResultsSoFar
       .filter(r => r && reopenIds.has(r.task.id))
-      .map(r => ({ ...r.task, status: 'todo', attempts: 0 }))
+      .map(r => ({
+        ...r.task,
+        status: 'todo',
+        attempts: 0,
+        successCriterion: correctedCriterionByTaskId.get(r.task.id) ?? r.task.successCriterion,
+      }))
+    // The Director is instructed to only return real, existing task ids,
+    // but if it ever invents a free-text label instead (e.g. a description
+    // of the problem rather than an "M#-T#" id), that id matches nothing
+    // above and would otherwise vanish silently — the "bug" then just
+    // resurfaces every review with no one ever assigned to fix it. Surface
+    // it loudly instead of losing it.
+    const matchedIds = new Set(tasksToReopen.map(t => t.id))
+    const unmatchedIds = [...reopenIds].filter(id => !matchedIds.has(id))
+    if (unmatchedIds.length > 0) {
+      log(`WARNING — Milestone ${milestone.id} reopen round ${reopenRound + 1}: the Director's reopenTasks named ${unmatchedIds.length} id(s) that don't match any known task and will NOT be fixed this round: ${unmatchedIds.join(', ')} — reason(s) given: ${unmatchedIds.map(id => `"${reasonByTaskId.get(id)}"`).join('; ')}. This usually means the Director invented a free-text label instead of reusing a real task id.`)
+    }
     const freshResults = await pipeline(
       tasksToReopen,
       (task) => implementAndTestTask(task, args.targetProjectPath, vision, reasonByTaskId.get(task.id))
     )
     const freshById = new Map(freshResults.map(r => [r.task.id, r]))
     currentTaskResults = currentTaskResults.map(r => freshById.get(r.task.id) ?? r)
+    // A reopened task can belong to an earlier, already-"done" milestone —
+    // patch its accumulated result in place too, or the next playtest/
+    // critique pass still sees the stale pre-fix result.
+    for (let i = 0; i < accumulatedTaskResults.length; i++) {
+      const fresh = freshById.get(accumulatedTaskResults[i].task.id)
+      if (fresh) accumulatedTaskResults[i] = fresh
+    }
   }
 
   const blocked = currentTaskResults.filter(r => r && r.status === 'blocked')

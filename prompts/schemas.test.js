@@ -101,3 +101,9 @@ test('FINAL_REVIEW_SCHEMA requires ready, reopenTasks, and summary, and reopenTa
   assert.equal(itemSchema.properties.taskId.type, 'string')
   assert.equal(itemSchema.properties.reason.type, 'string')
 })
+
+test('FINAL_REVIEW_SCHEMA reopenTasks items support an optional correctedSuccessCriterion, not required', () => {
+  const itemSchema = FINAL_REVIEW_SCHEMA.properties.reopenTasks.items
+  assert.ok(!itemSchema.required.includes('correctedSuccessCriterion'))
+  assert.equal(itemSchema.properties.correctedSuccessCriterion.type, 'string')
+})

@@ -45,7 +45,12 @@ specific problems rather than matching against examples:
   frame-to-frame motion, is not animation and reads as unfinished/novice
   work no matter how good the individual pose looks. This pipeline has
   shipped exactly this before; check for it every time, not just when it
-  happens to catch your eye.
+  happens to catch your eye. Also check actions with an obvious physical
+  impact (watering, harvesting, landing a hit, walking through mud/tall
+  grass) for a matching particle/VFX effect — a splash, a puff of dust,
+  an impact burst. An action like this with no particle feedback at all
+  reads as unfinished the same way a missing animation state does; flag
+  it the same way, sized against the vision's own scope.
 - Level / world design: is the layout sensible, is there confusing dead
   space or an unreachable area, does the difficulty/pacing match what the
   vision's priorities imply, is there anything a first-time player would
@@ -91,7 +96,17 @@ specific problems rather than matching against examples:
 - Vision fidelity, from a quality angle (not just literal coherence,
   which the Director separately checks): does what got built actually
   deliver the "hook" described in the vision, or does it technically
-  contain all the pieces while still missing the point?
+  contain all the pieces while still missing the point? Specifically
+  watch for a core mechanic that exists but feels hollow or isolated
+  from the ecosystem a real player would expect around it — a "plant a
+  seed" loop with only ever one kind of seed and no visible source for
+  it, an enemy encounter with only one enemy shape once the vision's
+  scope implies more, a reward/progress mechanic with nothing that
+  actually drops or unlocks. A mechanic that technically passes its
+  successCriterion while stopping short of this is a real, blocking-
+  eligible failure to deliver the vision, not a "later polish" item —
+  judge the expected depth against the vision's own stated
+  scope/priorities, the same way you judge decoration density.
 - Anything else you personally notice while actually playing that a
   demanding player or reviewer would call out, even if it doesn't fit
   neatly into any category above.

@@ -150,6 +150,10 @@ export const FINAL_REVIEW_SCHEMA = {
             type: 'string',
             description: 'Concrete, actionable reason this specific task is being reopened — the ONLY context a fresh Fixer with no memory of this review will get, so name the actual problem (and what would fix it, if known) rather than a vague label like "vision drift" or "quality issue". If this reopen is driven by the Quality Critic, reuse the Critic\'s own specific issue text rather than summarizing it away.',
           },
+          correctedSuccessCriterion: {
+            type: 'string',
+            description: 'ONLY set this when the task\'s ORIGINAL successCriterion is itself factually wrong — objectively incompatible with a verified functional constraint (e.g. it names a specific key binding that provably collides with an existing control), not merely hard to satisfy or a matter of taste. Give the corrected criterion text verbatim, ready to replace the stored one. Leave unset for an ordinary reopen (a real bug, a missed detail, a quality issue) where the original criterion is still correct and only the implementation needs to change — setting this for anything less than a proven factual error would let a reopen silently rewrite a task\'s requirements instead of fixing the code.',
+          },
         },
       },
     },
