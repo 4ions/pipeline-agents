@@ -1,7 +1,7 @@
 // prompts/schemas.test.js
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { VISION_SCHEMA, BACKLOG_SCHEMA, TEST_RESULT_SCHEMA, PLAYTEST_SCHEMA, QUALITY_CRITIQUE_SCHEMA, DESIGN_REVIEW_SCHEMA, MILESTONE_SCHEMA, ROADMAP_SCHEMA, ROADMAP_REVIEW_SCHEMA, MILESTONE_SNAPSHOT_SCHEMA, RESUME_STATE_SCHEMA, FINAL_REVIEW_SCHEMA } from './schemas.js'
+import { VISION_SCHEMA, BACKLOG_SCHEMA, BACKLOG_TASK_SCHEMA, TEST_RESULT_SCHEMA, PLAYTEST_SCHEMA, QUALITY_CRITIQUE_SCHEMA, DESIGN_REVIEW_SCHEMA, MILESTONE_SCHEMA, ROADMAP_SCHEMA, ROADMAP_REVIEW_SCHEMA, MILESTONE_SNAPSHOT_SCHEMA, RESUME_STATE_SCHEMA, FINAL_REVIEW_SCHEMA, TRAINING_MONITOR_SCHEMA } from './schemas.js'
 import { validateBacklogTask, TASK_STATUSES } from '../lib/stateSchemas.js'
 
 test('VISION_SCHEMA declares the required top-level fields', () => {
@@ -106,4 +106,24 @@ test('FINAL_REVIEW_SCHEMA reopenTasks items support an optional correctedSuccess
   const itemSchema = FINAL_REVIEW_SCHEMA.properties.reopenTasks.items
   assert.ok(!itemSchema.required.includes('correctedSuccessCriterion'))
   assert.equal(itemSchema.properties.correctedSuccessCriterion.type, 'string')
+})
+
+test('BACKLOG_TASK_SCHEMA taskKind is optional (not required) and covers all ML-training task kinds', () => {
+  assert.ok(!BACKLOG_TASK_SCHEMA.required.includes('taskKind'), 'taskKind must stay optional so every existing task-producing prompt keeps working unchanged')
+  assert.deepEqual(
+    new Set(BACKLOG_TASK_SCHEMA.properties.taskKind.enum),
+    new Set(['standard', 'ml-training-launch', 'ml-training-monitor', 'ml-training-integrate-verify'])
+  )
+})
+
+test('TRAINING_MONITOR_SCHEMA requires verdict and action, and verdict/action enums match the spec\'s decision tree', () => {
+  assert.deepEqual(new Set(TRAINING_MONITOR_SCHEMA.required), new Set(['verdict', 'action', 'reason']))
+  assert.deepEqual(
+    new Set(TRAINING_MONITOR_SCHEMA.properties.verdict.enum),
+    new Set(['plateau', 'plateau_degenerate', 'diverge'])
+  )
+  assert.deepEqual(
+    new Set(TRAINING_MONITOR_SCHEMA.properties.action.enum),
+    new Set(['proceed_to_integration', 'retry', 'escalate'])
+  )
 })

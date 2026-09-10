@@ -20,6 +20,11 @@ export const BACKLOG_TASK_SCHEMA = {
     needsAnimation: { type: 'boolean', description: 'true if this task\'s GameObject moves or reacts to something and needs at least an idle state plus one action state' },
     status: { type: 'string', enum: ['todo', 'in_progress', 'done', 'blocked'] },
     attempts: { type: 'number' },
+    taskKind: {
+      type: 'string',
+      enum: ['standard', 'ml-training-launch', 'ml-training-monitor', 'ml-training-integrate-verify'],
+      description: 'Defaults to "standard" (the normal Programmer/Artist/Tester implementation cycle) when omitted — every task in every other milestone this pipeline has ever built is "standard". Only set this for a milestone specifically about ML-Agents training: "ml-training-launch" for the task that exports a standalone build and starts an mlagents-learn run in the background; "ml-training-monitor" for the task that polls that run\'s convergence and decides when to stop it; "ml-training-integrate-verify" for the task that assigns the resulting trained model and verifies its measured hunt/evasion success rates via real Play Mode.',
+    },
   },
 }
 
@@ -158,6 +163,31 @@ export const FINAL_REVIEW_SCHEMA = {
       },
     },
     summary: { type: 'string' },
+  },
+}
+
+export const TRAINING_MONITOR_SCHEMA = {
+  type: 'object',
+  required: ['verdict', 'action', 'reason'],
+  properties: {
+    verdict: {
+      type: 'string',
+      enum: ['plateau', 'plateau_degenerate', 'diverge'],
+      description: 'The deterministic convergence-check script\'s own verdict, copied verbatim — never re-derived from raw numbers by the agent itself. "plateau" is a genuine converged, non-degenerate result. "plateau_degenerate" is a flat reward curve with near-zero hunt attempts (the pure-forager equilibrium) — NOT a success even though the reward curve looks fine. "diverge" is reward collapse.',
+    },
+    action: {
+      type: 'string',
+      enum: ['proceed_to_integration', 'retry', 'escalate'],
+      description: '"proceed_to_integration" only for verdict "plateau". "retry" for "plateau_degenerate" or "diverge" on the FIRST attempt (one adjusted-config retry, per the spec\'s bounded-retry design — mirrors this pipeline\'s existing MAX_MILESTONE_REOPEN_ROUNDS pattern). "escalate" if this is already a retry attempt and it also ended in "plateau_degenerate" or "diverge" — never a second automatic retry.',
+    },
+    reason: {
+      type: 'string',
+      description: 'Concrete, numeric — cite the actual observed rolling-mean/std/episode-length/role-balance numbers the script reported, not a vague restatement of the verdict.',
+    },
+    adjustedConfig: {
+      type: 'string',
+      description: 'Present only when action is "retry" — the SPECIFIC config change being made (e.g. "widened curriculum stage 1 power-variance range from X-Y to X2-Y2" or "raised hunt-success reward from 0.3 to 0.5"), per the spec\'s constraint that a retry must be a concrete, bounded, documented adjustment, not open-ended re-engineering.',
+    },
   },
 }
 
