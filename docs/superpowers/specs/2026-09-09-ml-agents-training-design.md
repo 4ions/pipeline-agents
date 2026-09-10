@@ -407,13 +407,37 @@ To actually counter the cold-start/degenerate-equilibrium risk, add:
   a first-class concern elsewhere (see the milestone-build
   resumability design) — a multi-hour unattended training run needs the
   same treatment, not a silent gap.
-- Define an explicit outcome for "training ran for its allotted budget
-  and never produced coherent hunting/evading behavior" (per the
-  role-balance telemetry above) — for a fully autonomous milestone, this
-  can't be left implicit. Reasonable options: retry once with an
-  adjusted curriculum/reward configuration, or escalate to the
-  Director's existing blocked-task escalation path rather than silently
-  accepting a degenerate policy as "done."
+- **Unified verdict → action decision tree** (this replaces treating
+  "PLATEAU-DEGENERATE" and "ran out of budget without success" as two
+  separate, disconnected cases — they're the same decision point and
+  need one state machine, not two ad hoc mentions):
+
+  | Verdict (from Convergence monitoring) | Action |
+  |---|---|
+  | PLATEAU | Proceed to Model integration & verification. |
+  | PLATEAU-DEGENERATE | One retry, with an adjusted curriculum/reward config (see below for what "adjusted" means concretely) — not a second attempt with identical settings. |
+  | DIVERGE | Same: one retry with an adjusted reward config, not merely "flagged for reconsideration" and left open-ended — the retry IS the concrete next step, using the same reopen-budget mechanism below. |
+  | Hits `max_steps` while still CONTINUE (never reached PLATEAU/DIVERGE) | Treat identically to PLATEAU-DEGENERATE — training ending inconclusively is not a silent pass. |
+  | Retry itself also ends in PLATEAU-DEGENERATE, DIVERGE, or inconclusive | Escalate to the Director's existing blocked-task escalation path (the same one used elsewhere in this pipeline for a task that exhausts its attempts) — do NOT retry a third time automatically. |
+
+  **What "an adjusted curriculum/reward config" concretely means** for
+  the one automatic retry (this needs to be a specific, bounded set of
+  knobs the agent can adjust mechanically, not open-ended
+  re-engineering): widen the curriculum's early-stage encounter-forcing
+  ranges further (higher density/power-variance/scarcer food than the
+  first attempt used), and/or increase the hunting/evading reward
+  magnitudes relative to foraging (within the already-established
+  ≤1.0-magnitude, [-1,1]-per-decision constraints). Document whichever
+  specific change was made in the retry's own run-id/config so the
+  Director's escalation report (if it still fails) shows what was
+  already tried, not just that it failed twice.
+
+  **Retry budget reuses this pipeline's existing pattern, not a new
+  one**: cap automatic retries at 1 (mirroring the spirit of
+  `MAX_MILESTONE_REOPEN_ROUNDS` used elsewhere in this pipeline for
+  bounded, non-infinite retry loops) — this was previously stated only
+  as "retry once" in passing; it's now the explicit, load-bearing bound
+  for every non-PLATEAU verdict above, not a suggestion.
 
 ### PPO hyperparameters — starting point
 
@@ -561,12 +585,80 @@ role distribution, not necessarily the highest-numbered one.
 
 The resulting `.onnx` is copied into the Unity
 project's `Assets/`, assigned to the trained agents' `Behavior
-Parameters` component in Inference mode. The existing Tester/Critic
-roles then verify it with the SAME rigor already established elsewhere
-in this pipeline (real Play Mode, real simulated input, not just
-"component looks configured") — trained agents should visibly chase,
-flee, and seek food sensibly when actually played against, not just
-"the model loaded without errors."
+Parameters` component in Inference mode.
+
+### Concrete, measured pass/fail criterion — not qualitative judgment
+
+"Trained agents should visibly chase, flee, and seek food sensibly" is
+exactly the kind of vague language this pipeline's own Director/Critic
+rules elsewhere explicitly reject as unactionable — and for a TRAINED
+model specifically, qualitative judgment is even less appropriate than
+usual: imperfect behavior (a missed catch, a failed evasion) is
+NORMAL and expected from a stochastic policy, not automatically a bug
+the way it would be in a deterministic rule-based system. Without a
+numeric bar, the Tester has no principled way to tell "a well-trained
+model with normal misses" apart from "a poorly-trained model" — it
+could reject a genuinely good model, or wave through a mediocre one,
+on impression alone.
+
+**Also**: the role-balance telemetry that gates training-time verdicts
+(hunt attempts/successes, etc.) is measured DURING training, on a
+policy that's still exploring (sampling actions, not always taking the
+greedy/highest-probability action) — this is not the same thing as how
+the exported `.onnx` behaves running in pure inference mode. The
+deployed model's actual behavior needs its own, separate, post-hoc
+measurement; training-time telemetry looking healthy does not by
+itself guarantee the deployed model will.
+
+**Concrete design — build a runtime encounter-telemetry component,
+reused across both training and verification**: implement a small
+MonoBehaviour (e.g. `EncounterTelemetry`) using the SAME discrete
+encounter definition already established in the Reward function
+section above (an encounter begins when a higher/lower-power agent
+enters immediate range, with the same hysteresis margin/dwell-time/
+cooldown fix already specified there, and ends when the pair separates
+past that margin or the encounter resolves in a catch). This component
+logs each encounter's outcome (predator caught prey / prey escaped) to
+the console/activity log any time Play Mode runs — not just during
+Python-side `mlagents-learn` training, where the equivalent counters
+only exist as `StatsRecorder` values Python-side. Using one shared
+definition for both training-time reward logic and this
+verification-time counter keeps "what counts as a hunt/evasion" from
+drifting into two different implementations that could disagree.
+
+The Tester's verification pass then does this concretely, not
+impressionistically:
+1. Run a real Play Mode session (real simulated input if the player is
+   involved, or a pure AI-vs-AI observation window otherwise) long
+   enough to accumulate a minimum number of encounters — pick a
+   concrete number (e.g., at least 15-20 encounters observed) rather
+   than a fixed time window, since encounter rate itself varies; a
+   fixed-time window could pass by accumulating too few data points to
+   mean anything.
+2. Read the `EncounterTelemetry` log/counters via the same
+   console-log/`get_component_properties` tooling the Tester already
+   uses elsewhere in this pipeline.
+3. Compute the observed hunt-success rate and evasion-success rate
+   separately (a predator role and a prey role are different skills;
+   collapsing them into one aggregate number would hide a model that's
+   only good at one).
+4. **PASS requires each rate to fall within an expected band, not
+   above a bare minimum and not at/near 100%**: a floor rules out "the
+   trained model barely does anything coherent" (e.g., below ~30-40%
+   success, tune during the first real run), and a ceiling flags
+   suspicion rather than celebration (a rate at or near 100% on either
+   skill is a signal to investigate — either the encounter-difficulty
+   curriculum's final target configuration made that skill trivially
+   easy, or something is exploiting a bug in the encounter/catch logic
+   itself — not proof of a great model). Both thresholds are starting
+   points to tune against the first real training run's actual
+   numbers, not values to treat as correct on paper.
+5. If the measured rates fall outside the expected band, this is a
+   real FAIL, reported with the actual observed numbers as evidence —
+   feed it back into the retry/escalation decision tree above (this
+   counts toward the same 1-retry budget, it isn't a separate infinite
+   loop of its own) rather than treating training-time convergence
+   alone as sufficient to call this milestone done.
 
 ## Open risks
 
@@ -607,6 +699,14 @@ flee, and seek food sensibly when actually played against, not just
   picking these as one coupled decision in the implementation plan, not
   two independent guesses, since the floor is meaningless if `max_steps`
   doesn't comfortably exceed it.
+- **Post-training verification success-rate band (30-40% floor,
+  near-100% ceiling) is a starting guess, not a validated number** —
+  same status as the convergence script's thresholds: expect to tune
+  both bounds against the first real training run's actual observed
+  hunt/evasion success rates, not treat the numbers in this spec as
+  correct on paper. If real trained-model numbers cluster somewhere
+  unexpected relative to this band, that's information to revise the
+  band with, not necessarily evidence the model itself is bad.
 
 ## Sources consulted
 
