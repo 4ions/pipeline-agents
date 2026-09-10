@@ -1,3 +1,6 @@
+import json
+import subprocess
+import sys
 import unittest
 from training_convergence_check import compute_verdict
 
@@ -76,6 +79,23 @@ class TestComputeVerdict(unittest.TestCase):
         result = compute_verdict(history, MIN_STEP_FLOOR, SLOPE_TOLERANCE, CONSECUTIVE_CHECKS,
                                   DIVERGE_STD_MULTIPLIER, DIVERGE_DROP_FRACTION, HUNT_ATTEMPT_FLOOR)
         self.assertNotEqual(result["verdict"], "diverge")
+
+
+class TestCliEntryPoint(unittest.TestCase):
+    def test_cli_prints_valid_json_verdict_for_empty_logdir(self):
+        # No real training run needed for this smoke test — an empty/
+        # nonexistent logdir must still produce a well-formed "continue"
+        # verdict, not crash. Real TensorBoard-reading behavior against
+        # an ACTUAL training run's event files cannot be verified from
+        # this repo (no live Unity/mlagents-learn run here) — that's a
+        # real-world verification step, not something this test proves.
+        result = subprocess.run(
+            [sys.executable, "training_convergence_check.py", "--logdir", "/tmp/does-not-exist-logdir"],
+            capture_output=True, text=True, cwd=".",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        verdict = json.loads(result.stdout)
+        self.assertEqual(verdict["verdict"], "continue")
 
 
 if __name__ == "__main__":
