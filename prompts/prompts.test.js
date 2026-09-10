@@ -389,3 +389,23 @@ test('launchTrainingPrompt instructs writing the run-id/logdir to a file the mon
   assert.ok(result.includes('.pipeline/ml-training/'))
   assert.ok(result.includes(FIXTURE_ML_LAUNCH_TASK.id))
 })
+
+const FIXTURE_ML_MONITOR_TASK = { ...FIXTURE_TASK, id: 'M13-T2', taskKind: 'ml-training-monitor', description: 'Monitor training convergence and decide when to stop' }
+
+test('monitorConvergencePrompt instructs looping the convergence-check script via Bash and consuming its verdict, never reasoning over raw numbers itself', () => {
+  const result = monitorConvergencePrompt(FIXTURE_ML_MONITOR_TASK, FIXTURE_TARGET_PATH, FIXTURE_VISION, 1)
+  assert.equal(typeof result, 'string')
+  assert.ok(result.includes('training_convergence_check.py'))
+  assert.ok(result.includes('plateau_degenerate'))
+  assert.ok(result.includes('diverge'))
+  assert.ok(result.includes('never') && result.toLowerCase().includes('raw'), 'must warn against reasoning over raw numbers directly')
+})
+
+test('monitorConvergencePrompt treats attempt 2 as the bounded retry, escalating instead of retrying again on a repeat bad verdict', () => {
+  const firstAttempt = monitorConvergencePrompt(FIXTURE_ML_MONITOR_TASK, FIXTURE_TARGET_PATH, FIXTURE_VISION, 1)
+  assert.ok(firstAttempt.includes('"retry"'))
+
+  const secondAttempt = monitorConvergencePrompt(FIXTURE_ML_MONITOR_TASK, FIXTURE_TARGET_PATH, FIXTURE_VISION, 2)
+  assert.ok(secondAttempt.includes('escalate'))
+  assert.ok(secondAttempt.includes('do NOT') || secondAttempt.includes('never'), 'must forbid a second automatic retry')
+})

@@ -69,3 +69,56 @@ process is actually running (not just that the launch command returned
 without error — check the process is alive and the log file is
 growing).`
 }
+
+export function monitorConvergencePrompt(task, targetProjectPath, vision, attemptNumber) {
+  const isRetry = attemptNumber >= 2
+  return `You are monitoring an ML-Agents training run for
+${targetProjectPath}, per
+${targetProjectPath}/../auto-game-build/docs/superpowers/specs/2026-09-09-ml-agents-training-design.md
+("Convergence monitoring").
+${vision ? `
+Full game context: """${vision.identity}""" Priorities, in order: ${vision.priorities.join(', ')}.
+` : ''}
+Task: ${task.description}
+Success criterion: ${task.successCriterion}
+This is monitoring attempt ${attemptNumber}${isRetry ? ' (the ONE bounded retry after an earlier plateau_degenerate/diverge verdict — see below)' : ' (the first attempt)'}.
+
+Read ${targetProjectPath}/.pipeline/ml-training/${task.id.replace(/-T\d+$/, '')}-T1-run.json
+(written by the launch task) for the training run's logdir path.
+
+CRITICAL — you NEVER judge convergence by reading raw Mean
+Reward/Std/episode-length numbers yourself. Loop: run
+\`python3 <path to auto-game-build repo>/tools/training_convergence_check.py
+--logdir <logdir from the run.json>\` via Bash (use the World project's
+own venv Python at .venv-mlagents/bin/python3, which already has
+tensorboard installed), wait a reasonable interval (e.g. \`sleep 300\`)
+between checks so you're not spamming the filesystem, and repeat until
+the script's own JSON output reports a verdict other than "continue"
+(that field is called "verdict" in its JSON output — it is the ONLY
+thing you read to decide what happened, not the underlying reward
+numbers). This can take a genuinely long time (potentially hours) —
+keep looping within this same task, don't give up early.
+
+Once the script reports a terminal verdict, decide the action per this
+table (this is the ENTIRE decision logic — do not improvise a different
+mapping):
+- verdict "plateau" -> action "proceed_to_integration".
+- verdict "plateau_degenerate" or "diverge"${isRetry ? `, and this IS
+  attempt ${attemptNumber} (a retry) -> action "escalate". Do NOT set
+  action to "retry" here — the one automatic retry budget for this
+  training run is already used; a second automatic retry is never
+  allowed, escalate to a human via the Director's existing blocked-task
+  path instead.` : ` -> action "retry". Pick ONE concrete, bounded
+  adjustment (not open-ended re-engineering) and state it in
+  "adjustedConfig": either widen the curriculum's early-stage
+  encounter-forcing ranges further than the first attempt used, or
+  raise the hunting/evading reward magnitudes relative to foraging
+  (staying within the spec's ≤1.0-magnitude, [-1,1]-per-decision
+  constraints). Then actually relaunch training with that one change
+  (same process as the launch task, but with the adjusted config and a
+  new run-id) before returning your structured result.`}
+
+Report your decision as structured data: verdict (copied verbatim from
+the script), action, reason (cite the script's own numeric reason text,
+not a restatement), and adjustedConfig (only when action is "retry").`
+}
