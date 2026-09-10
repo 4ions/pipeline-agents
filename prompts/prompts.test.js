@@ -138,6 +138,15 @@ test('designPrompt requires a particle/VFX effect for actions with obvious physi
   assert.ok(result.includes('needsArt: true'))
 })
 
+test('designPrompt explains taskKind for an ML-Agents training milestone, including the exact three kinds and their order', () => {
+  const result = designPrompt(FIXTURE_VISION, FIXTURE_TARGET_PATH)
+  assert.ok(result.includes('taskKind'))
+  assert.ok(result.includes('ml-training-launch'))
+  assert.ok(result.includes('ml-training-monitor'))
+  assert.ok(result.includes('ml-training-integrate-verify'))
+  assert.ok(result.includes('"standard"'), 'must clarify that every non-ML-training task keeps using the default')
+})
+
 test('designReviewPrompt checks the backlog for named VFX on physical-impact actions', () => {
   const backlog = { gdd: 'a short GDD', tasks: [FIXTURE_TASK, FIXTURE_ANIMATED_TASK] }
   const result = designReviewPrompt(FIXTURE_VISION, backlog.gdd, backlog, FIXTURE_TARGET_PATH)

@@ -70,6 +70,28 @@ implement it. Every task MUST have:
   cozy, minimal game needs a small, simple particle burst, not a
   particle-heavy action-game VFX system) — the bar is "this specific
   action has SOME visible physical feedback," not maximum spectacle.
+- CRITICAL — taskKind: leave this unset (it defaults to "standard", the
+  normal Programmer/Artist/Tester cycle) for every task in every milestone
+  EXCEPT one specifically about ML-Agents training. If — and only if —
+  this milestone's scope is training a reinforcement-learning model (the
+  environment C# code itself, e.g. the Agent/Academy scripts implementing
+  observation/action/reward, is still a "standard" task; it's just normal
+  C# game code verified the normal way), author exactly these three
+  ADDITIONAL tasks in this order, each with the matching taskKind:
+  1. taskKind "ml-training-launch" — exports a standalone build and starts
+     the training run in the background.
+  2. taskKind "ml-training-monitor" — polls the training run's convergence
+     and decides when to stop it (this can take a genuinely long time;
+     its successCriterion should describe reaching a definitive stop
+     verdict, not a fixed duration).
+  3. taskKind "ml-training-integrate-verify" — assigns the resulting
+     trained model and verifies its measured hunt/evasion success rates
+     in real Play Mode.
+  These three have a real sequential dependency (launch, then monitor,
+  then integrate) — describe that dependency in each task's description
+  so it's clear to whoever reads the backlog later, even though this
+  pipeline's Implementation phase already runs backlog tasks through
+  its normal pipeline() call in array order.
 
 HARD RULE — shared state gets ONE owner, everyone else reads it: whenever
 more than one task will need the same underlying concept (world/level
