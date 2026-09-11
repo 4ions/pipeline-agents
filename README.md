@@ -84,3 +84,4 @@ follow-up work, not covered by this plan).
   existing documented limitation about "simplify" Director decisions not
   automatically re-entering the implement loop — same category of
   "recorded but not auto-acted-on" behavior.)
+# pipeline-agents
