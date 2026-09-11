@@ -109,21 +109,38 @@ async function implementAndTestTask(task, targetProjectPath, vision, reopenReaso
 // MAX_FIX_ATTEMPTS the same way standard tasks do.
 async function implementAndVerifyMlTrainingTask(task, targetProjectPath, vision, reopenReason) {
   if (task.taskKind === 'ml-training-launch') {
-    await agent(launchTrainingPrompt(task, targetProjectPath, vision), {
+    // The launch agent reports whether a live training process was
+    // actually verified running. Reporting 'done' unconditionally would
+    // send the monitor task off to watch a run that never started (and,
+    // with the sequential ML chain below, the blocked status is what
+    // stops the rest of the chain from running against nothing).
+    const launch = await agent(launchTrainingPrompt(task, targetProjectPath, vision, reopenReason), {
       phase: 'Implementation',
       label: `ml-launch:${task.id}`,
+      schema: TRAINING_LAUNCH_SCHEMA,
     })
-    return { task, status: 'done', attempts: 1, lastResult: { passed: true, evidence: 'Training launch task has no pass/fail cycle of its own — its success is implicitly verified by the monitor task actually finding a running training process.' }, animationResult: null }
+    const launched = !!(launch && launch.launched)
+    return {
+      task,
+      status: launched ? 'done' : 'blocked',
+      attempts: 1,
+      lastResult: {
+        passed: launched,
+        evidence: launch ? (launch.detail || `Training run ${launch.runId || '(no run-id reported)'} launched.`) : 'Launch agent returned no result.',
+        bug: launched ? undefined : { description: `ML-Agents training did not launch: ${launch ? (launch.detail || 'agent reported launched=false with no detail') : 'launch agent returned no result'}`, reproSteps: [] },
+      },
+      animationResult: null,
+    }
   }
 
   if (task.taskKind === 'ml-training-monitor') {
-    const firstAttempt = await agent(monitorConvergencePrompt(task, targetProjectPath, vision, 1), {
+    const firstAttempt = await agent(monitorConvergencePrompt(task, targetProjectPath, vision, 1, reopenReason), {
       phase: 'Implementation',
       label: `ml-monitor:${task.id}:1`,
       schema: TRAINING_MONITOR_SCHEMA,
     })
     const finalVerdict = (firstAttempt && firstAttempt.action === 'retry')
-      ? await agent(monitorConvergencePrompt(task, targetProjectPath, vision, 2), {
+      ? await agent(monitorConvergencePrompt(task, targetProjectPath, vision, 2, reopenReason), {
           phase: 'Implementation',
           label: `ml-monitor:${task.id}:2`,
           schema: TRAINING_MONITOR_SCHEMA,
@@ -158,6 +175,55 @@ async function implementAndVerifyMlTrainingTask(task, targetProjectPath, vision,
     }
   }
   return { task, status: 'blocked', attempts: MAX_FIX_ATTEMPTS, lastResult, animationResult: null }
+}
+
+// pipeline() runs every item through all stages CONCURRENTLY — it does
+// not treat array order as an execution order, so it cannot express the
+// ml-training-* chain's real dependencies (the environment C# code must
+// exist before a build is exported and training launched; training must
+// be launched before it can be monitored; monitoring must reach a
+// verdict before a model exists to integrate). So: every standard task
+// still goes through the concurrent pipeline() exactly as before, and
+// only once ALL of them have finished do the ML tasks run — strictly one
+// at a time, in backlog order. If one comes back blocked, the rest of
+// the chain is skipped (marked blocked) rather than run against a
+// failed launch/monitor. Results come back in the caller's original
+// task order.
+async function runImplementationTasks(tasks, targetProjectPath, vision, reopenReasonFor) {
+  const reasonOf = (task) => (reopenReasonFor ? reopenReasonFor(task) : undefined)
+  const standardTasks = tasks.filter(t => !t.taskKind || t.taskKind === 'standard')
+  const mlTasks = tasks.filter(t => t.taskKind && t.taskKind !== 'standard')
+
+  const standardResults = await pipeline(
+    standardTasks,
+    (task) => implementAndTestTask(task, targetProjectPath, vision, reasonOf(task))
+  )
+
+  const mlResults = []
+  let chainBroken = null
+  for (const task of mlTasks) {
+    if (chainBroken) {
+      log(`Skipping ML-training task ${task.id} (${task.taskKind}): its chain predecessor ${chainBroken} is blocked, so there is nothing valid for it to run against.`)
+      mlResults.push({
+        task,
+        status: 'blocked',
+        attempts: 0,
+        lastResult: {
+          passed: false,
+          evidence: `Not attempted — the earlier ML-training task ${chainBroken} in this milestone's launch -> monitor -> integrate chain is blocked.`,
+          bug: { description: `ML-training task ${task.id} was skipped because its chain predecessor ${chainBroken} did not succeed.`, reproSteps: [] },
+        },
+        animationResult: null,
+      })
+      continue
+    }
+    const result = await implementAndTestTask(task, targetProjectPath, vision, reasonOf(task))
+    mlResults.push(result)
+    if (!result || result.status === 'blocked') chainBroken = task.id
+  }
+
+  const byId = new Map([...standardResults, ...mlResults].filter(Boolean).map(r => [r.task.id, r]))
+  return tasks.map(t => byId.get(t.id)).filter(Boolean)
 }
 
 // Every invocation checks for prior state first, using the same
@@ -346,10 +412,7 @@ now, only what THIS MILESTONE ONLY says above: ${vision.scope}`,
   const combinedGdd = allGddsSoFar.map(g => `## Milestone ${g.id}\n${g.gdd}`).join('\n\n')
 
   phase('Implementation')
-  let currentTaskResults = await pipeline(
-    design.tasks,
-    (task) => implementAndTestTask(task, args.targetProjectPath, vision)
-  )
+  let currentTaskResults = await runImplementationTasks(design.tasks, args.targetProjectPath, vision)
 
   let playtestResult = null
   let critique = null
@@ -492,9 +555,11 @@ now, only what THIS MILESTONE ONLY says above: ${vision.scope}`,
     if (unmatchedIds.length > 0) {
       log(`WARNING — Milestone ${milestone.id} reopen round ${reopenRound + 1}: the Director's reopenTasks named ${unmatchedIds.length} id(s) that don't match any known task and will NOT be fixed this round: ${unmatchedIds.join(', ')} — reason(s) given: ${unmatchedIds.map(id => `"${reasonByTaskId.get(id)}"`).join('; ')}. This usually means the Director invented a free-text label instead of reusing a real task id.`)
     }
-    const freshResults = await pipeline(
+    const freshResults = await runImplementationTasks(
       tasksToReopen,
-      (task) => implementAndTestTask(task, args.targetProjectPath, vision, reasonByTaskId.get(task.id))
+      args.targetProjectPath,
+      vision,
+      (task) => reasonByTaskId.get(task.id)
     )
     const freshById = new Map(freshResults.map(r => [r.task.id, r]))
     currentTaskResults = currentTaskResults.map(r => freshById.get(r.task.id) ?? r)

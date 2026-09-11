@@ -28,6 +28,35 @@ for the full design.
    })
    ```
 
+## Task kinds (`taskKind`)
+
+Every backlog task carries an optional `taskKind`. Unset (or `"standard"`)
+is the normal Programmer → Artist → Tester cycle and covers virtually
+every task, including ordinary C# gameplay code. The other three kinds
+exist only for an ML-Agents training milestone and are authored as a
+chain by the Designer: `"ml-training-launch"` (export a standalone build
+and start `mlagents-learn` in the background), `"ml-training-monitor"`
+(poll convergence until a terminal verdict, then stop training), and
+`"ml-training-integrate-verify"` (assign the trained `.onnx` and verify
+measured hunt/evasion rates in Play Mode). Standard tasks still run
+concurrently; the ML chain runs strictly after them, one task at a time
+in backlog order, and the rest of the chain is skipped if one is blocked.
+
+## `tools/`
+
+`tools/training_convergence_check.py` is the deterministic
+convergence-verdict script the monitor task polls — the monitoring agent
+never judges a reward curve itself, it only reads this script's
+`verdict`. It is intentionally not part of this repo's own Node
+dependencies: it runs under the **target Unity project's** ML-Agents
+virtualenv (`<target-project>/.venv-mlagents/bin/python3`), which is
+where `tensorboard` lives. Its own unit tests are plain `unittest` and
+need no TensorBoard install:
+
+```
+cd tools && python3 -m unittest training_convergence_check_test -v
+```
+
 ## Resuming across sessions
 
 Re-run the same `Workflow` call in a new session with the same

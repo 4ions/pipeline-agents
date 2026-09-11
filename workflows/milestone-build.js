@@ -187,6 +187,21 @@ const FINAL_REVIEW_SCHEMA = {
   },
 }
 
+const TRAINING_LAUNCH_SCHEMA = {
+  type: 'object',
+  required: ['launched', 'detail'],
+  properties: {
+    launched: {
+      type: 'boolean',
+      description: 'True ONLY if a live mlagents-learn process was actually verified running (process alive, log file growing) — not merely that the launch command returned without error. False if the standalone build failed, the trainer died on startup, or aliveness could not be confirmed; the workflow blocks the task (and the dependent monitor/integrate tasks) on false rather than letting a later task monitor a run that never started.',
+    },
+    runId: { type: 'string', description: 'The mlagents-learn --run-id used, matching the run-info json file written for the monitor task.' },
+    logdir: { type: 'string', description: 'The results/TensorBoard logdir the convergence-check script will read.' },
+    pid: { type: 'number', description: 'PID of the launched mlagents-learn process, so the monitor task can terminate it once it reaches a terminal verdict.' },
+    detail: { type: 'string', description: 'What was verified (or, when launched is false, concretely what went wrong).' },
+  },
+}
+
 const TRAINING_MONITOR_SCHEMA = {
   type: 'object',
   required: ['verdict', 'action', 'reason'],
@@ -251,7 +266,23 @@ const RESUME_STATE_SCHEMA = {
   },
 }
 
-function launchTrainingPrompt(task, targetProjectPath, vision) {
+// A reopened task carries the Director's own reason for reopening it —
+// without it the agent only sees the task's original, already-"met"
+// successCriterion and just redoes the same thing (the same failure mode
+// fixed for standard tasks in "Carry a concrete per-task reason through
+// the final-review reopen loop").
+function reopenBlock(reopenReason) {
+  return reopenReason
+    ? `
+CRITICAL — this task is being RE-RUN because the Director's final review
+reopened it. The reason given was: """${reopenReason}"""
+Address that specific complaint — do not simply repeat the original run
+and re-report the same outcome.
+`
+    : ''
+}
+
+function launchTrainingPrompt(task, targetProjectPath, vision, reopenReason) {
   return `You are a SENIOR ${task.specialization} Unity/ML-Agents engineer
 working on ${targetProjectPath} — this task exports a standalone Player
 build of the current scene and launches an ML-Agents PPO training run
@@ -263,7 +294,7 @@ Full game context: """${vision.identity}""" Priorities, in order: ${vision.prior
 ` : ''}
 Task: ${task.description}
 Success criterion: ${task.successCriterion}
-
+${reopenBlock(reopenReason)}
 CRITICAL — export a STANDALONE build, do not train against the live
 Editor. Live Editor Play Mode in this environment has a known OS-focus
 dependency that a headless training run must not inherit, and training
@@ -305,9 +336,17 @@ starting fresh.
 
 CRITICAL — write ${targetProjectPath}/.pipeline/ml-training/${task.id}-run.json
 with the exact run-id, the mlagents-learn results/TensorBoard logdir
-path, and the build path used — the monitor task (a separate, later
-task) reads this file to know what to watch. Use your Read/Write tools
-for this, not execute_code.
+path, the build path used, the trainer config's max_steps value, and the
+PID of the launched mlagents-learn process (capture it from the shell,
+e.g. \`echo $!\` right after backgrounding it, and sanity-check it with
+\`ps -p <pid>\` before writing it down) — the monitor task (a separate,
+later task) reads this file to know what to watch, what step ceiling to
+check against, and which process to terminate when training is done.
+Shape: {"runId": "...", "logdir": "...", "buildPath": "...",
+"maxSteps": <number>, "pid": <number>}. Use your Read/Write tools for
+this, not execute_code. This is the ONLY run-info file for this
+milestone — if the monitor task later relaunches training under a new
+run-id, it overwrites this same file.
 
 Append a "start" line and, when the process is confirmed launched (not
 when training finishes — that's a different task), a "done" line to
@@ -317,13 +356,15 @@ timestamp from shell 'date -u +%Y-%m-%dT%H:%M:%SZ'>", "role":
 "${task.id}", "event": "start"|"done", "detail": "<short note, e.g.
 'Launched training run <run-id>, num-envs=N, max_steps=X'>"}.
 
-Report back the run-id, the logdir path, and confirmation the training
-process is actually running (not just that the launch command returned
-without error — check the process is alive and the log file is
-growing).`
+Report back as structured data: "launched" (true ONLY if you verified
+the process is actually alive and its log file is growing — not merely
+that the launch command returned without error; report false if the
+build failed, mlagents-learn died on startup, or you could not confirm
+a live process), "runId", "logdir", "pid", and "detail" explaining what
+you verified or what went wrong.`
 }
 
-function monitorConvergencePrompt(task, targetProjectPath, vision, attemptNumber) {
+function monitorConvergencePrompt(task, targetProjectPath, vision, attemptNumber, reopenReason) {
   const isRetry = attemptNumber >= 2
   return `You are monitoring an ML-Agents training run for
 ${targetProjectPath}, per
@@ -335,22 +376,44 @@ Full game context: """${vision.identity}""" Priorities, in order: ${vision.prior
 Task: ${task.description}
 Success criterion: ${task.successCriterion}
 This is monitoring attempt ${attemptNumber}${isRetry ? ' (the ONE bounded retry after an earlier plateau_degenerate/diverge verdict — see below)' : ' (the first attempt)'}.
-
-Read ${targetProjectPath}/.pipeline/ml-training/${task.id.replace(/-T\d+$/, '')}-T1-run.json
-(written by the launch task) for the training run's logdir path.
+${reopenBlock(reopenReason)}
+CRITICAL — find the run-info file by PATTERN, not by a guessed task id:
+list \`${targetProjectPath}/.pipeline/ml-training/*-run.json\` and read
+the MOST RECENTLY MODIFIED one (there is normally exactly one; if a
+retry attempt rewrote it, the newest is the live run). Do NOT construct
+a filename from a task id — the launch task is not necessarily task 1 of
+this milestone, so its id is not predictable from yours. That file gives
+you the run-id, the TensorBoard logdir, the config's max_steps, and the
+PID of the running mlagents-learn process.
 
 CRITICAL — you NEVER judge convergence by reading raw Mean
 Reward/Std/episode-length numbers yourself. Loop: run
 \`python3 <path to auto-game-build repo>/tools/training_convergence_check.py
---logdir <logdir from the run.json>\` via Bash (use the World project's
-own venv Python at .venv-mlagents/bin/python3, which already has
-tensorboard installed), wait a reasonable interval (e.g. \`sleep 300\`)
-between checks so you're not spamming the filesystem, and repeat until
-the script's own JSON output reports a verdict other than "continue"
-(that field is called "verdict" in its JSON output — it is the ONLY
-thing you read to decide what happened, not the underlying reward
-numbers). This can take a genuinely long time (potentially hours) —
-keep looping within this same task, don't give up early.
+--logdir <logdir from the run-info file> --max-steps <maxSteps from the
+run-info file>\` via Bash (use the World project's own venv Python at
+.venv-mlagents/bin/python3, which already has tensorboard installed),
+wait a reasonable interval (e.g. \`sleep 300\`) between checks so you're
+not spamming the filesystem, and repeat until the script's own JSON
+output reports a verdict other than "continue" (that field is called
+"verdict" in its JSON output — it is the ONLY thing you read to decide
+what happened, not the underlying reward numbers). Passing --max-steps
+is REQUIRED, not optional: it is what makes the script report a terminal
+verdict once the run exhausts its step ceiling instead of saying
+"continue" forever.
+
+BOUNDED polling — this can take a genuinely long time (potentially
+hours), so keep looping within this same task rather than giving up
+after a few checks, but the loop is NOT unbounded: run at most 200
+convergence checks in this single task invocation. Count them. If you
+reach that cap while the script is still saying "continue", stop
+polling, terminate the training process (see below), and return verdict
+"plateau_degenerate" with action ${isRetry ? '"escalate"' : '"retry"'}
+and a reason stating you hit the 200-check polling cap without a
+terminal verdict — same bounded-retry discipline this task's
+one-retry-then-escalate rule already follows. Also bail out this same
+way if the PID from the run-info file is no longer alive (\`ps -p
+<pid>\`) and the script still reports "continue" — the run died without
+converging; never keep polling a dead process.
 
 Once the script reports a terminal verdict, decide the action per this
 table (this is the ENTIRE decision logic — do not improvise a different
@@ -367,9 +430,29 @@ mapping):
   encounter-forcing ranges further than the first attempt used, or
   raise the hunting/evading reward magnitudes relative to foraging
   (staying within the spec's ≤1.0-magnitude, [-1,1]-per-decision
-  constraints). Then actually relaunch training with that one change
-  (same process as the launch task, but with the adjusted config and a
-  new run-id) before returning your structured result.`}
+  constraints). Then actually relaunch training with that one change:
+  first terminate the CURRENT training process (\`kill <pid from the
+  run-info file>\`, then confirm with \`ps -p <pid>\` that it is gone —
+  \`kill -9\` if it isn't) so two runs never compete for the machine,
+  then start the new run the same way the launch task did, with the
+  adjusted config and a NEW run-id.
+  CRITICAL — before you return, OVERWRITE the run-info json file you
+  read at the start of this task with the new run's runId, logdir,
+  maxSteps and pid. The next convergence check finds that file by
+  "most recently modified" and would otherwise read the STALE first
+  run's logdir and monitor data that can never change again. Verify the
+  rewrite by reading the file back and confirming it names the new
+  run-id.`}
+
+CRITICAL — stopping training: once you reach a TERMINAL decision
+(action "proceed_to_integration" or "escalate"), your LAST action before
+returning is to terminate the training process: \`kill <pid from the
+run-info file>\`, then confirm with \`ps -p <pid>\` that it is no longer
+running (escalate to \`kill -9 <pid>\` if it survives). Nothing else in
+this pipeline ever stops mlagents-learn — left running it keeps burning
+CPU and writing checkpoints, competing with the Play Mode verification
+that runs next. Do NOT kill it when your action is "retry" (that branch
+relaunches training on purpose, per above).
 
 Report your decision as structured data: verdict (copied verbatim from
 the script), action, reason (cite the script's own numeric reason text,
@@ -801,9 +884,16 @@ implement it. Every task MUST have:
      in real Play Mode.
   These three have a real sequential dependency (launch, then monitor,
   then integrate) — describe that dependency in each task's description
-  so it's clear to whoever reads the backlog later, even though this
-  pipeline's Implementation phase already runs backlog tasks through
-  its normal pipeline() call in array order.
+  so it's clear to whoever reads the backlog later. The workflow enforces
+  that sequencing itself: standard tasks still run concurrently through
+  the Implementation phase's normal pipeline() call (which does NOT
+  respect array order), and only once ALL of them have finished does it
+  run the ml-training-* tasks one at a time, in the order you list them,
+  skipping the rest of the chain if one comes back blocked. So the
+  environment C# "standard" task is guaranteed to be done before the
+  launch task starts — but two ml-training-* tasks are never run in
+  parallel, and ordering between the three is exactly the order you
+  write them in.
 
 HARD RULE — shared state gets ONE owner, everyone else reads it: whenever
 more than one task will need the same underlying concept (world/level
@@ -2214,21 +2304,38 @@ async function implementAndTestTask(task, targetProjectPath, vision, reopenReaso
 // MAX_FIX_ATTEMPTS the same way standard tasks do.
 async function implementAndVerifyMlTrainingTask(task, targetProjectPath, vision, reopenReason) {
   if (task.taskKind === 'ml-training-launch') {
-    await agent(launchTrainingPrompt(task, targetProjectPath, vision), {
+    // The launch agent reports whether a live training process was
+    // actually verified running. Reporting 'done' unconditionally would
+    // send the monitor task off to watch a run that never started (and,
+    // with the sequential ML chain below, the blocked status is what
+    // stops the rest of the chain from running against nothing).
+    const launch = await agent(launchTrainingPrompt(task, targetProjectPath, vision, reopenReason), {
       phase: 'Implementation',
       label: `ml-launch:${task.id}`,
+      schema: TRAINING_LAUNCH_SCHEMA,
     })
-    return { task, status: 'done', attempts: 1, lastResult: { passed: true, evidence: 'Training launch task has no pass/fail cycle of its own — its success is implicitly verified by the monitor task actually finding a running training process.' }, animationResult: null }
+    const launched = !!(launch && launch.launched)
+    return {
+      task,
+      status: launched ? 'done' : 'blocked',
+      attempts: 1,
+      lastResult: {
+        passed: launched,
+        evidence: launch ? (launch.detail || `Training run ${launch.runId || '(no run-id reported)'} launched.`) : 'Launch agent returned no result.',
+        bug: launched ? undefined : { description: `ML-Agents training did not launch: ${launch ? (launch.detail || 'agent reported launched=false with no detail') : 'launch agent returned no result'}`, reproSteps: [] },
+      },
+      animationResult: null,
+    }
   }
 
   if (task.taskKind === 'ml-training-monitor') {
-    const firstAttempt = await agent(monitorConvergencePrompt(task, targetProjectPath, vision, 1), {
+    const firstAttempt = await agent(monitorConvergencePrompt(task, targetProjectPath, vision, 1, reopenReason), {
       phase: 'Implementation',
       label: `ml-monitor:${task.id}:1`,
       schema: TRAINING_MONITOR_SCHEMA,
     })
     const finalVerdict = (firstAttempt && firstAttempt.action === 'retry')
-      ? await agent(monitorConvergencePrompt(task, targetProjectPath, vision, 2), {
+      ? await agent(monitorConvergencePrompt(task, targetProjectPath, vision, 2, reopenReason), {
           phase: 'Implementation',
           label: `ml-monitor:${task.id}:2`,
           schema: TRAINING_MONITOR_SCHEMA,
@@ -2263,6 +2370,55 @@ async function implementAndVerifyMlTrainingTask(task, targetProjectPath, vision,
     }
   }
   return { task, status: 'blocked', attempts: MAX_FIX_ATTEMPTS, lastResult, animationResult: null }
+}
+
+// pipeline() runs every item through all stages CONCURRENTLY — it does
+// not treat array order as an execution order, so it cannot express the
+// ml-training-* chain's real dependencies (the environment C# code must
+// exist before a build is exported and training launched; training must
+// be launched before it can be monitored; monitoring must reach a
+// verdict before a model exists to integrate). So: every standard task
+// still goes through the concurrent pipeline() exactly as before, and
+// only once ALL of them have finished do the ML tasks run — strictly one
+// at a time, in backlog order. If one comes back blocked, the rest of
+// the chain is skipped (marked blocked) rather than run against a
+// failed launch/monitor. Results come back in the caller's original
+// task order.
+async function runImplementationTasks(tasks, targetProjectPath, vision, reopenReasonFor) {
+  const reasonOf = (task) => (reopenReasonFor ? reopenReasonFor(task) : undefined)
+  const standardTasks = tasks.filter(t => !t.taskKind || t.taskKind === 'standard')
+  const mlTasks = tasks.filter(t => t.taskKind && t.taskKind !== 'standard')
+
+  const standardResults = await pipeline(
+    standardTasks,
+    (task) => implementAndTestTask(task, targetProjectPath, vision, reasonOf(task))
+  )
+
+  const mlResults = []
+  let chainBroken = null
+  for (const task of mlTasks) {
+    if (chainBroken) {
+      log(`Skipping ML-training task ${task.id} (${task.taskKind}): its chain predecessor ${chainBroken} is blocked, so there is nothing valid for it to run against.`)
+      mlResults.push({
+        task,
+        status: 'blocked',
+        attempts: 0,
+        lastResult: {
+          passed: false,
+          evidence: `Not attempted — the earlier ML-training task ${chainBroken} in this milestone's launch -> monitor -> integrate chain is blocked.`,
+          bug: { description: `ML-training task ${task.id} was skipped because its chain predecessor ${chainBroken} did not succeed.`, reproSteps: [] },
+        },
+        animationResult: null,
+      })
+      continue
+    }
+    const result = await implementAndTestTask(task, targetProjectPath, vision, reasonOf(task))
+    mlResults.push(result)
+    if (!result || result.status === 'blocked') chainBroken = task.id
+  }
+
+  const byId = new Map([...standardResults, ...mlResults].filter(Boolean).map(r => [r.task.id, r]))
+  return tasks.map(t => byId.get(t.id)).filter(Boolean)
 }
 
 // Every invocation checks for prior state first, using the same
@@ -2451,10 +2607,7 @@ now, only what THIS MILESTONE ONLY says above: ${vision.scope}`,
   const combinedGdd = allGddsSoFar.map(g => `## Milestone ${g.id}\n${g.gdd}`).join('\n\n')
 
   phase('Implementation')
-  let currentTaskResults = await pipeline(
-    design.tasks,
-    (task) => implementAndTestTask(task, args.targetProjectPath, vision)
-  )
+  let currentTaskResults = await runImplementationTasks(design.tasks, args.targetProjectPath, vision)
 
   let playtestResult = null
   let critique = null
@@ -2597,9 +2750,11 @@ now, only what THIS MILESTONE ONLY says above: ${vision.scope}`,
     if (unmatchedIds.length > 0) {
       log(`WARNING — Milestone ${milestone.id} reopen round ${reopenRound + 1}: the Director's reopenTasks named ${unmatchedIds.length} id(s) that don't match any known task and will NOT be fixed this round: ${unmatchedIds.join(', ')} — reason(s) given: ${unmatchedIds.map(id => `"${reasonByTaskId.get(id)}"`).join('; ')}. This usually means the Director invented a free-text label instead of reusing a real task id.`)
     }
-    const freshResults = await pipeline(
+    const freshResults = await runImplementationTasks(
       tasksToReopen,
-      (task) => implementAndTestTask(task, args.targetProjectPath, vision, reasonByTaskId.get(task.id))
+      args.targetProjectPath,
+      vision,
+      (task) => reasonByTaskId.get(task.id)
     )
     const freshById = new Map(freshResults.map(r => [r.task.id, r]))
     currentTaskResults = currentTaskResults.map(r => freshById.get(r.task.id) ?? r)
