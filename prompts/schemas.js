@@ -166,6 +166,21 @@ export const FINAL_REVIEW_SCHEMA = {
   },
 }
 
+export const TRAINING_LAUNCH_SCHEMA = {
+  type: 'object',
+  required: ['launched', 'detail'],
+  properties: {
+    launched: {
+      type: 'boolean',
+      description: 'True ONLY if a live mlagents-learn process was actually verified running (process alive, log file growing) — not merely that the launch command returned without error. False if the standalone build failed, the trainer died on startup, or aliveness could not be confirmed; the workflow blocks the task (and the dependent monitor/integrate tasks) on false rather than letting a later task monitor a run that never started.',
+    },
+    runId: { type: 'string', description: 'The mlagents-learn --run-id used, matching the run-info json file written for the monitor task.' },
+    logdir: { type: 'string', description: 'The results/TensorBoard logdir the convergence-check script will read.' },
+    pid: { type: 'number', description: 'PID of the launched mlagents-learn process, so the monitor task can terminate it once it reaches a terminal verdict.' },
+    detail: { type: 'string', description: 'What was verified (or, when launched is false, concretely what went wrong).' },
+  },
+}
+
 export const TRAINING_MONITOR_SCHEMA = {
   type: 'object',
   required: ['verdict', 'action', 'reason'],

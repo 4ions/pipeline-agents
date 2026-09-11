@@ -393,10 +393,25 @@ test('launchTrainingPrompt instructs exporting a standalone build (not the live 
   assert.ok(result.includes(FIXTURE_TARGET_PATH))
 })
 
-test('launchTrainingPrompt instructs writing the run-id/logdir to a file the monitor task can find', () => {
+test('launchTrainingPrompt instructs writing the run-id/logdir/max_steps/pid to a file the monitor task can find', () => {
   const result = launchTrainingPrompt(FIXTURE_ML_LAUNCH_TASK, FIXTURE_TARGET_PATH, FIXTURE_VISION)
   assert.ok(result.includes('.pipeline/ml-training/'))
   assert.ok(result.includes(FIXTURE_ML_LAUNCH_TASK.id))
+  assert.ok(result.includes('"pid"'), 'the monitor task can only stop training if the launch task records the PID')
+  assert.ok(result.includes('"maxSteps"'), 'the monitor task passes max_steps to the convergence-check script')
+})
+
+test('launchTrainingPrompt requires reporting a verified-live launch, not just a command that returned', () => {
+  const result = launchTrainingPrompt(FIXTURE_ML_LAUNCH_TASK, FIXTURE_TARGET_PATH, FIXTURE_VISION)
+  assert.ok(result.includes('"launched"'))
+  assert.ok(result.includes('report false'))
+})
+
+test('launchTrainingPrompt carries a reopen reason when the Director reopened the task', () => {
+  const plain = launchTrainingPrompt(FIXTURE_ML_LAUNCH_TASK, FIXTURE_TARGET_PATH, FIXTURE_VISION)
+  assert.ok(!plain.includes('reopened it'))
+  const reopened = launchTrainingPrompt(FIXTURE_ML_LAUNCH_TASK, FIXTURE_TARGET_PATH, FIXTURE_VISION, 'the build targeted the wrong platform')
+  assert.ok(reopened.includes('the build targeted the wrong platform'))
 })
 
 const FIXTURE_ML_MONITOR_TASK = { ...FIXTURE_TASK, id: 'M13-T2', taskKind: 'ml-training-monitor', description: 'Monitor training convergence and decide when to stop' }
@@ -419,6 +434,32 @@ test('monitorConvergencePrompt treats attempt 2 as the bounded retry, escalating
   assert.ok(secondAttempt.includes('do NOT') || secondAttempt.includes('never'), 'must forbid a second automatic retry')
 })
 
+test('monitorConvergencePrompt finds the run-info file by pattern instead of constructing a task-1 filename', () => {
+  const result = monitorConvergencePrompt(FIXTURE_ML_MONITOR_TASK, FIXTURE_TARGET_PATH, FIXTURE_VISION, 1)
+  assert.ok(!result.includes('-T1-run.json'), 'the launch task is not necessarily task 1 of the milestone')
+  assert.ok(result.includes('*-run.json'))
+  assert.ok(result.includes('MOST RECENTLY MODIFIED'))
+})
+
+test('monitorConvergencePrompt passes --max-steps and bounds its own polling loop', () => {
+  const result = monitorConvergencePrompt(FIXTURE_ML_MONITOR_TASK, FIXTURE_TARGET_PATH, FIXTURE_VISION, 1)
+  assert.ok(result.includes('--max-steps'))
+  assert.ok(result.includes('200'), 'must state a concrete cap on convergence checks, not "keep looping" forever')
+  assert.ok(result.includes('ps -p'), 'must bail out if the training process died')
+})
+
+test('monitorConvergencePrompt terminates the training process on a terminal verdict but not on a retry', () => {
+  const result = monitorConvergencePrompt(FIXTURE_ML_MONITOR_TASK, FIXTURE_TARGET_PATH, FIXTURE_VISION, 1)
+  assert.ok(result.includes('kill <pid'))
+  assert.ok(result.includes('Do NOT kill it when your action is "retry"'))
+})
+
+test('monitorConvergencePrompt retry branch overwrites the run-info file so the next check reads the new run', () => {
+  const result = monitorConvergencePrompt(FIXTURE_ML_MONITOR_TASK, FIXTURE_TARGET_PATH, FIXTURE_VISION, 1)
+  assert.ok(result.includes('OVERWRITE the run-info json file'))
+  assert.ok(result.toLowerCase().includes('stale'))
+})
+
 const FIXTURE_ML_VERIFY_TASK = { ...FIXTURE_TASK, id: 'M13-T3', taskKind: 'ml-training-integrate-verify', description: 'Assign the trained model and verify measured hunt/evasion success rates' }
 
 test('trainedModelVerificationPrompt requires a concrete, measured pass/fail band (not qualitative judgment) using EncounterTelemetry', () => {
@@ -434,5 +475,6 @@ test('trainedModelVerificationPrompt requires a concrete, measured pass/fail ban
 test('trainedModelVerificationPrompt selects the deployed checkpoint by role-balance telemetry, not simply the last one saved', () => {
   const result = trainedModelVerificationPrompt(FIXTURE_ML_VERIFY_TASK, 1, FIXTURE_TARGET_PATH, FIXTURE_VISION)
   assert.ok(result.toLowerCase().includes('checkpoint'))
-  assert.ok(result.includes('not') && result.toLowerCase().includes('last'))
+  assert.ok(result.includes('last/highest-numbered'), 'must explicitly forbid just taking the final checkpoint')
+  assert.ok(result.toLowerCase().includes('role-balance'), 'must say what the checkpoint is selected BY')
 })

@@ -89,9 +89,16 @@ implement it. Every task MUST have:
      in real Play Mode.
   These three have a real sequential dependency (launch, then monitor,
   then integrate) — describe that dependency in each task's description
-  so it's clear to whoever reads the backlog later, even though this
-  pipeline's Implementation phase already runs backlog tasks through
-  its normal pipeline() call in array order.
+  so it's clear to whoever reads the backlog later. The workflow enforces
+  that sequencing itself: standard tasks still run concurrently through
+  the Implementation phase's normal pipeline() call (which does NOT
+  respect array order), and only once ALL of them have finished does it
+  run the ml-training-* tasks one at a time, in the order you list them,
+  skipping the rest of the chain if one comes back blocked. So the
+  environment C# "standard" task is guaranteed to be done before the
+  launch task starts — but two ml-training-* tasks are never run in
+  parallel, and ordering between the three is exactly the order you
+  write them in.
 
 HARD RULE — shared state gets ONE owner, everyone else reads it: whenever
 more than one task will need the same underlying concept (world/level

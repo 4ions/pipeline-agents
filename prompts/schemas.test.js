@@ -1,7 +1,7 @@
 // prompts/schemas.test.js
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { VISION_SCHEMA, BACKLOG_SCHEMA, BACKLOG_TASK_SCHEMA, TEST_RESULT_SCHEMA, PLAYTEST_SCHEMA, QUALITY_CRITIQUE_SCHEMA, DESIGN_REVIEW_SCHEMA, MILESTONE_SCHEMA, ROADMAP_SCHEMA, ROADMAP_REVIEW_SCHEMA, MILESTONE_SNAPSHOT_SCHEMA, RESUME_STATE_SCHEMA, FINAL_REVIEW_SCHEMA, TRAINING_MONITOR_SCHEMA } from './schemas.js'
+import { VISION_SCHEMA, BACKLOG_SCHEMA, BACKLOG_TASK_SCHEMA, TEST_RESULT_SCHEMA, PLAYTEST_SCHEMA, QUALITY_CRITIQUE_SCHEMA, DESIGN_REVIEW_SCHEMA, MILESTONE_SCHEMA, ROADMAP_SCHEMA, ROADMAP_REVIEW_SCHEMA, MILESTONE_SNAPSHOT_SCHEMA, RESUME_STATE_SCHEMA, FINAL_REVIEW_SCHEMA, TRAINING_MONITOR_SCHEMA, TRAINING_LAUNCH_SCHEMA } from './schemas.js'
 import { validateBacklogTask, TASK_STATUSES } from '../lib/stateSchemas.js'
 
 test('VISION_SCHEMA declares the required top-level fields', () => {
@@ -126,4 +126,13 @@ test('TRAINING_MONITOR_SCHEMA requires verdict and action, and verdict/action en
     new Set(TRAINING_MONITOR_SCHEMA.properties.action.enum),
     new Set(['proceed_to_integration', 'retry', 'escalate'])
   )
+})
+
+test('TRAINING_LAUNCH_SCHEMA requires a boolean launched flag so a failed launch blocks the ML chain', () => {
+  assert.deepEqual(new Set(TRAINING_LAUNCH_SCHEMA.required), new Set(['launched', 'detail']))
+  assert.equal(TRAINING_LAUNCH_SCHEMA.properties.launched.type, 'boolean')
+  for (const field of ['runId', 'logdir', 'pid']) {
+    assert.ok(TRAINING_LAUNCH_SCHEMA.properties[field], `${field} must be declared for the monitor task to use`)
+    assert.ok(!TRAINING_LAUNCH_SCHEMA.required.includes(field), `${field} is unavailable on a failed launch, so it cannot be required`)
+  }
 })
