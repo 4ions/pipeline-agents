@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 import unittest
@@ -81,6 +82,80 @@ class TestComputeVerdict(unittest.TestCase):
         self.assertNotEqual(result["verdict"], "diverge")
 
 
+class TestMaxStepsExhaustion(unittest.TestCase):
+    def _trending_history(self):
+        return [make_entry(step=s, mean_reward=0.1 * i, hunt_attempts=15)
+                for i, s in enumerate(range(MIN_STEP_FLOOR, MIN_STEP_FLOOR + 400_000, 100_000), start=1)]
+
+    def test_reaching_max_steps_while_still_continue_is_treated_as_plateau_degenerate(self):
+        # Training ending inconclusively (no more steps left to run, but
+        # the curve never converged) must NOT be a silent pass, and must
+        # not leave the monitor looping forever on "continue".
+        history = self._trending_history()
+        result = compute_verdict(history, MIN_STEP_FLOOR, SLOPE_TOLERANCE, CONSECUTIVE_CHECKS,
+                                  DIVERGE_STD_MULTIPLIER, DIVERGE_DROP_FRACTION, HUNT_ATTEMPT_FLOOR,
+                                  max_steps=history[-1]["step"])
+        self.assertEqual(result["verdict"], "plateau_degenerate")
+        self.assertIn("max_steps", result["reason"])
+
+    def test_below_max_steps_still_continues(self):
+        history = self._trending_history()
+        result = compute_verdict(history, MIN_STEP_FLOOR, SLOPE_TOLERANCE, CONSECUTIVE_CHECKS,
+                                  DIVERGE_STD_MULTIPLIER, DIVERGE_DROP_FRACTION, HUNT_ATTEMPT_FLOOR,
+                                  max_steps=history[-1]["step"] + 1_000_000)
+        self.assertEqual(result["verdict"], "continue")
+
+
+class TestMissingRoleBalanceTelemetry(unittest.TestCase):
+    def test_absent_custom_tags_report_continue_not_a_false_degenerate(self):
+        # Tags never written at all (e.g. a StatsRecorder tag-name
+        # mismatch) must be distinguishable from a genuinely zero rate.
+        history = []
+        for s in range(MIN_STEP_FLOOR, MIN_STEP_FLOOR + 400_000, 100_000):
+            entry = make_entry(step=s, mean_reward=0.8)
+            del entry["hunt_attempts"]
+            del entry["hunt_successes"]
+            del entry["episodes"]
+            history.append(entry)
+        result = compute_verdict(history, MIN_STEP_FLOOR, SLOPE_TOLERANCE, CONSECUTIVE_CHECKS,
+                                  DIVERGE_STD_MULTIPLIER, DIVERGE_DROP_FRACTION, HUNT_ATTEMPT_FLOOR)
+        self.assertEqual(result["verdict"], "continue")
+        self.assertIn("NOT FOUND", result["reason"])
+
+    def test_present_but_zero_custom_tags_still_report_plateau_degenerate(self):
+        history = [make_entry(step=s, mean_reward=0.8, hunt_attempts=0, hunt_successes=0, episodes=100)
+                   for s in range(MIN_STEP_FLOOR, MIN_STEP_FLOOR + 400_000, 100_000)]
+        result = compute_verdict(history, MIN_STEP_FLOOR, SLOPE_TOLERANCE, CONSECUTIVE_CHECKS,
+                                  DIVERGE_STD_MULTIPLIER, DIVERGE_DROP_FRACTION, HUNT_ATTEMPT_FLOOR)
+        self.assertEqual(result["verdict"], "plateau_degenerate")
+        self.assertIn("hunt-attempt rate", result["reason"])
+
+
+class TestDivergeSignals(unittest.TestCase):
+    def test_diverge_on_reward_drop_when_the_peak_is_negative(self):
+        # Early training under the spec's per-step time penalty routinely
+        # has a negative peak reward; drop detection must still work there.
+        history = (
+            [make_entry(step=s, mean_reward=-0.2, hunt_attempts=15)
+             for s in range(MIN_STEP_FLOOR, MIN_STEP_FLOOR + 300_000, 100_000)]
+            + [make_entry(step=MIN_STEP_FLOOR + 300_000, mean_reward=-0.8, hunt_attempts=15)]
+        )
+        result = compute_verdict(history, MIN_STEP_FLOOR, SLOPE_TOLERANCE, CONSECUTIVE_CHECKS,
+                                  DIVERGE_STD_MULTIPLIER, DIVERGE_DROP_FRACTION, HUNT_ATTEMPT_FLOOR)
+        self.assertEqual(result["verdict"], "diverge")
+
+    def test_episode_length_collapse_alongside_falling_reward_is_diverge(self):
+        history = (
+            [make_entry(step=s, mean_reward=1.0, episode_length=200, hunt_attempts=15)
+             for s in range(MIN_STEP_FLOOR, MIN_STEP_FLOOR + 300_000, 100_000)]
+            + [make_entry(step=MIN_STEP_FLOOR + 300_000, mean_reward=0.9, episode_length=40, hunt_attempts=15)]
+        )
+        result = compute_verdict(history, MIN_STEP_FLOOR, SLOPE_TOLERANCE, CONSECUTIVE_CHECKS,
+                                  DIVERGE_STD_MULTIPLIER, DIVERGE_DROP_FRACTION, HUNT_ATTEMPT_FLOOR)
+        self.assertEqual(result["verdict"], "diverge")
+        self.assertIn("Episode Length", result["reason"])
+
+
 class TestCliEntryPoint(unittest.TestCase):
     def test_cli_prints_valid_json_verdict_for_empty_logdir(self):
         # No real training run needed for this smoke test — an empty/
@@ -91,7 +166,7 @@ class TestCliEntryPoint(unittest.TestCase):
         # real-world verification step, not something this test proves.
         result = subprocess.run(
             [sys.executable, "training_convergence_check.py", "--logdir", "/tmp/does-not-exist-logdir"],
-            capture_output=True, text=True, cwd=".",
+            capture_output=True, text=True, cwd=os.path.dirname(os.path.abspath(__file__)),
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         verdict = json.loads(result.stdout)
