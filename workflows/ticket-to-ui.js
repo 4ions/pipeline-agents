@@ -152,8 +152,11 @@ doesn't call for, and don't drop any of the listed content either. Each
 section needs a short heading and a description concrete enough that
 someone could build its markup from it alone (e.g. "3-column card grid,
 each card: thumbnail placeholder + title + one line of body text" rather
-than "a card grid"). Return structured data matching the required schema
-— no files to write for this step.`
+than "a card grid"). ${existingLayout
+    ? 'Carry the existing "designPlan" field through unchanged in your output — don\'t alter it.'
+    : 'Leave "designPlan" unset — that only gets attached once a Render step actually builds the page, not before.'
+  } Return structured data matching the required schema — no files to
+write for this step.`
 }
 
 function wireframeRenderPrompt(intake, layout, outputDir, existingOutputDir) {
@@ -196,7 +199,7 @@ ${layout.sections
   .sort((a, b) => a.order - b.order)
   .map(s => `${s.order}. [${s.type}] (${s.status || 'new'}) ${s.heading} — ${s.description}`)
   .join('\n')}
-${layout.designPlan ? `\nExisting design plan to reuse verbatim:\nColors: ${layout.designPlan.colors.join(', ')}\nTypefaces: ${layout.designPlan.typefaces.join(', ')}\nLayout concept: ${layout.designPlan.layoutConcept}` : ''}
+${existingOutputDir && layout.designPlan ? `\nExisting design plan to reuse verbatim:\nColors: ${layout.designPlan.colors.join(', ')}\nTypefaces: ${layout.designPlan.typefaces.join(', ')}\nLayout concept: ${layout.designPlan.layoutConcept}` : ''}
 
 Page goal (for context, don't render this text literally): """${intake.pageGoal}"""
 
