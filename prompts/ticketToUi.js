@@ -62,6 +62,11 @@ export const DESIGN_PLAN_SCHEMA = {
     colors: { type: 'array', items: { type: 'string' }, description: '4-6 named hex tokens, each as "name #hexvalue" (e.g. "ink #1c1f24"), grounded in this page\'s specific subject — not a generic default palette' },
     typefaces: { type: 'array', items: { type: 'string' }, description: 'Each as "role: Font Family" (e.g. "display: Fraunces", "body: Source Sans 3")' },
     layoutConcept: { type: 'string', description: 'The layout concept in one or two sentences' },
+    components: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'Optional — named reusable UI patterns already established (or newly added) in this pipeline\'s shared design-system catalog, each as "Name: visual spec" (e.g. "StatusBadge: rounded pill, 4-6px vertical padding, colored bg+text per semantic state"). Omit/empty if there is no shared catalog for this run.',
+    },
   },
 }
 
@@ -138,6 +143,10 @@ Return, matching the required schema:
 - layoutConcept: one or two sentences on this file's own layout
   conventions (spacing scale, card/section treatment) worth carrying into
   the new page.
+- components: if this file already contains named, reusable components
+  (buttons, badges, cards — check via get_metadata/search_design_system),
+  list each as "Name: visual spec" so a later build can recreate/reuse
+  the same pattern instead of inventing a new one. Empty array if none.
 
 If the file/URL genuinely can't be read (no access, wrong id, tool
 error), still return the schema's required shape, but make every value
@@ -259,7 +268,7 @@ Approve only if none of these problems exist. Return structured data
 matching the required schema — no files to write for this step.`
 }
 
-export function figmaPushPrompt(intake, layout, outputDir, existingFigmaFileUrl, figmaPlanKey, fixFeedback) {
+export function figmaPushPrompt(intake, layout, outputDir, existingFigmaFileUrl, figmaPlanKey, fixFeedback, systemFileUrl) {
   const modeBlock = existingFigmaFileUrl
     ? `\n\nThis page already has a REAL Figma file — you are UPDATING it, not
 creating a new one: ${existingFigmaFileUrl}
@@ -301,11 +310,34 @@ from scratch and do not touch anything the issues below don't mention:
 """${fixFeedback}"""`
     : ''
 
+  const systemBlock = systemFileUrl
+    ? `\n\nThis pipeline maintains a SHARED design-system catalog across
+every page it builds, at ${systemFileUrl} — the whole point is that
+unrelated pages (an orders page, a catalog page, a wishlist page) end up
+looking like one product family instead of each inventing its own
+unrelated palette. Before using the design plan below, inspect that
+catalog file first (get_metadata / get_design_context, and
+search_design_system if it's set up as a published library) for its
+existing color/type choices and any named reusable components (buttons,
+badges, cards). Reuse whatever it already has verbatim — do not
+re-derive a color or redraw a component pattern that already exists
+there, even if the design plan below suggests something slightly
+different; the shared catalog wins. If this specific page genuinely
+needs a new color, typeface role, or repeated component pattern the
+catalog doesn't have yet, ALSO add it there (a labeled swatch/specimen
+frame, or — if it's a real repeated pattern like a button or badge — an
+actual reusable component via figma.createComponent()) so future pages
+can reuse it too, and say exactly what you added in your notes. Growing
+the catalog is expected and desired; silently reinventing something it
+already has is the failure mode to avoid.`
+    : ''
+
   return `You are building this page's design as a REAL Figma file — this
 is the pipeline's ONLY output for this page, there is no HTML mockup or
 local screenshot anywhere in this pipeline; do not create one.
 ${modeBlock}
 ${fixBlock}
+${systemBlock}
 
 Page title: ${layout.pageTitle}
 Layout approach: ${layout.layoutNotes}

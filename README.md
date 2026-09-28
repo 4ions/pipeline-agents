@@ -135,6 +135,26 @@ connector connected for the session and only *reads* Figma
 (`get_variable_defs`, `get_design_context`, `get_screenshot`) — separate
 from the Figma Push phase below, which *writes*.
 
+**Shared design-system catalog.** Left on its own, each fresh page
+invents its own unrelated palette — an orders page and a wishlist page
+end up looking like different products. Pass `figmaSystemFileUrl`
+pointing at one persistent Figma file this pipeline treats as its own
+catalog (colors, typefaces, reusable component patterns): every fresh
+page is grounded in it (taking precedence over `figmaFileUrl`) instead of
+inventing its own, and the Figma Push phase both reuses what's already
+there and *adds* anything the page genuinely needs that isn't yet
+catalogued — so the catalog grows across runs instead of drifting.
+There's no auto-bootstrap: create this file once (any Figma Push run
+creates a real file you can point at, or build one by hand) and reuse
+its URL on every later run:
+
+```
+Workflow({
+  scriptPath: "workflows/ticket-to-ui.js",
+  args: { ticket: "...", outputDir: "/tmp/ticket-to-ui-demo", figmaSystemFileUrl: "https://www.figma.com/design/<fileKey>/Design-System" }
+})
+```
+
 Pass `figmaTargetFileUrl` to push into a specific existing Figma file on
 a **fresh** run (instead of creating a new one), and `figmaPlanKey` (a
 Figma team/org key, e.g. `"team::1234567890"`) if the account has more

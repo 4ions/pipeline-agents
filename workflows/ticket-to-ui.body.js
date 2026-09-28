@@ -23,6 +23,17 @@
 // ground a FRESH page's palette/typefaces in a real Figma file's own
 // tokens instead of an invented one.
 //
+// args.figmaSystemFileUrl (optional): this pipeline's own persistent
+// design-system catalog (colors, typefaces, reusable component patterns)
+// that EVERY page — not just one — is grounded in and contributes back
+// to, so unrelated pages built on different runs still look like one
+// product family. Takes precedence over figmaFileUrl for grounding a
+// fresh page, and is passed to every Figma Push call (initial and
+// fix-in-place) so it's consulted before inventing anything and grown
+// when a page needs a genuinely new pattern. There is no auto-bootstrap:
+// create this file once (a normal Figma Push run, or by hand) and pass
+// its URL on every subsequent run to keep pages consistent.
+//
 // args.figmaTargetFileUrl (optional): push a fresh run into a specific
 // existing Figma file instead of creating a new one.
 // args.figmaPlanKey (optional): which Figma team/org to create a new file
@@ -63,16 +74,19 @@ if (args.existingOutputDir) {
 
 phase('Figma Tokens')
 let figmaDesignPlan = null
-if (args.figmaFileUrl && !existingLayout) {
-  figmaDesignPlan = await agent(figmaTokensPrompt(args.figmaFileUrl), {
+const tokensSourceUrl = args.figmaSystemFileUrl || args.figmaFileUrl || null
+if (tokensSourceUrl && !existingLayout) {
+  figmaDesignPlan = await agent(figmaTokensPrompt(tokensSourceUrl), {
     schema: DESIGN_PLAN_SCHEMA,
     phase: 'Figma Tokens',
   })
   if (!figmaDesignPlan) {
-    log(`Could not read design tokens from ${args.figmaFileUrl} — falling back to an invented design plan.`)
+    log(`Could not read design tokens from ${tokensSourceUrl} — falling back to an invented design plan.`)
+  } else if (args.figmaSystemFileUrl) {
+    log(`Grounded this fresh page in the shared design-system catalog at ${args.figmaSystemFileUrl}.`)
   }
-} else if (args.figmaFileUrl && existingLayout) {
-  log('figmaFileUrl was given but this is an extend-run — reusing the existing page\'s own design plan for continuity instead.')
+} else if (tokensSourceUrl && existingLayout) {
+  log('figmaFileUrl/figmaSystemFileUrl was given but this is an extend-run — reusing the existing page\'s own design plan for continuity instead.')
 }
 
 phase('Intake')
@@ -132,7 +146,7 @@ phase('Figma Push')
 const outputDir = args.outputDir || args.existingOutputDir
 const targetFigmaFileUrl = (existingLayout && existingLayout.figmaFileUrl) || args.figmaTargetFileUrl || null
 let figmaPush = await agent(
-  figmaPushPrompt(intake, layout, outputDir, targetFigmaFileUrl, args.figmaPlanKey),
+  figmaPushPrompt(intake, layout, outputDir, targetFigmaFileUrl, args.figmaPlanKey, undefined, args.figmaSystemFileUrl),
   { schema: FIGMA_PUSH_RESULT_SCHEMA, phase: 'Figma Push', label: 'figma-push:1' }
 )
 if (!figmaPush) {
@@ -161,7 +175,7 @@ if (figmaPush) {
     }
     log(`Quality gate round ${round}: ${blocking.length} blocking issue(s) — fixing in place: ${blocking.map(i => i.description).join('; ')}`)
     const fixed = await agent(
-      figmaPushPrompt(intake, layout, outputDir, figmaPush.figmaFileUrl, args.figmaPlanKey, blocking.map(i => i.description).join('; ')),
+      figmaPushPrompt(intake, layout, outputDir, figmaPush.figmaFileUrl, args.figmaPlanKey, blocking.map(i => i.description).join('; '), args.figmaSystemFileUrl),
       { schema: FIGMA_PUSH_RESULT_SCHEMA, phase: 'Quality Gate', label: `figma-fix:${round}` }
     )
     if (fixed) figmaPush = fixed
