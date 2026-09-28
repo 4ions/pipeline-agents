@@ -21,6 +21,17 @@
 // ground a FRESH page's palette/typefaces in a real Figma file's own
 // tokens instead of an invented one. Requires the Figma MCP connector to
 // be connected for this session.
+//
+// The local HTML/screenshot render is an intermediate artifact used for
+// the Design Review / Quality Gate loop — the actual final deliverable
+// is a REAL Figma file, built by the Figma Push phase (create_new_file +
+// use_figma). On a fresh page it creates a new file; on an extend-run it
+// reads the prior run's figmaFileUrl (persisted in layout.json) and
+// updates that same file instead. args.figmaTargetFileUrl overrides which
+// file to push into (useful to point a fresh run at a file that already
+// exists for another reason); args.figmaPlanKey picks which Figma
+// team/org to create a new file under when there's more than one and
+// neither was resolvable automatically.
 
 export const meta = {
   name: 'ticket-to-ui',
@@ -33,6 +44,7 @@ export const meta = {
     { title: 'Design Review' },
     { title: 'Render' },
     { title: 'Quality Gate' },
+    { title: 'Figma Push' },
     { title: 'Report' },
   ],
 }
@@ -162,5 +174,20 @@ if (render) {
   }
 }
 
+phase('Figma Push')
+const targetFigmaFileUrl = (existingLayout && existingLayout.figmaFileUrl) || args.figmaTargetFileUrl || null
+let figmaPush = null
+if (render) {
+  figmaPush = await agent(
+    figmaPushPrompt(intake, layout, render, outputDir, targetFigmaFileUrl, args.figmaPlanKey),
+    { schema: FIGMA_PUSH_RESULT_SCHEMA, phase: 'Figma Push' }
+  )
+  if (!figmaPush) {
+    log('Figma Push failed to return a result — the local HTML mockup is the only artifact for this run.')
+  }
+} else {
+  log('No render to push — skipping Figma Push.')
+}
+
 phase('Report')
-return { existingLayout, figmaDesignPlan, intake, layout, layoutReview, render, critique }
+return { existingLayout, figmaDesignPlan, intake, layout, layoutReview, render, critique, figmaPush }

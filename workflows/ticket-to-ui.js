@@ -13,6 +13,7 @@ export const meta = {
     { title: 'Design Review' },
     { title: 'Render' },
     { title: 'Quality Gate' },
+    { title: 'Figma Push' },
     { title: 'Report' },
   ],
 }
@@ -99,6 +100,7 @@ const UI_LAYOUT_SCHEMA = {
     layoutNotes: { type: 'string', description: 'Overall layout approach, e.g. "single column" or "sidebar + main content"' },
     sections: { type: 'array', items: UI_SECTION_SCHEMA },
     designPlan: { ...DESIGN_PLAN_SCHEMA, description: 'Only present once a Render step has run at least once for this page — carried forward so a later extend-run reuses the same palette/type instead of inventing a new one' },
+    figmaFileUrl: { type: 'string', description: 'Only present once a Figma Push step has run at least once for this page — the real Figma file this page lives in, carried forward so a later extend-run UPDATES that same file instead of creating a new one' },
   },
 }
 
@@ -144,6 +146,17 @@ const RENDER_RESULT_SCHEMA = {
   },
 }
 
+const FIGMA_PUSH_RESULT_SCHEMA = {
+  type: 'object',
+  required: ['figmaFileUrl', 'figmaFileKey', 'figmaNodeId', 'notes'],
+  properties: {
+    figmaFileUrl: { type: 'string', description: 'A real, openable Figma URL to the page frame, e.g. https://www.figma.com/design/<fileKey>/<name>?node-id=<node-id-with-dash>' },
+    figmaFileKey: { type: 'string', description: 'The Figma file key, for a later run to update the same file' },
+    figmaNodeId: { type: 'string', description: 'The wrapper frame\'s node id (colon form, e.g. "2:2"), for a later run to update the same frame' },
+    notes: { type: 'string', description: 'Anything worth flagging — sections simplified/skipped, font substitutions, whether this created a new file or updated an existing one' },
+  },
+}
+
 function figmaTokensPrompt(figmaFileUrl) {
   return `You are grounding this UI mockup's visual design in a REAL design
 system instead of inventing one. Use your Figma MCP tools (available via
@@ -181,8 +194,9 @@ Read tool — it is a previous run's page layout (design plan included) for
 a page that was already built and screenshotted at
 ${existingOutputDir}/wireframe.html. Return its contents verbatim as
 structured data matching the required schema (pageTitle, layoutNotes,
-sections including each one's status, and designPlan) — this is existing
-state to preserve, not something to redesign or second-guess.`
+sections including each one's status, designPlan, and figmaFileUrl if
+present) — this is existing state to preserve, not something to redesign
+or second-guess.`
 }
 
 function ticketIntakePrompt(ticket, existingLayout) {
@@ -246,8 +260,8 @@ section needs a short heading and a description concrete enough that
 someone could build its markup from it alone (e.g. "3-column card grid,
 each card: thumbnail placeholder + title + one line of body text" rather
 than "a card grid"). ${existingLayout
-    ? 'Carry the existing "designPlan" field through unchanged in your output — don\'t alter it.'
-    : 'Leave "designPlan" unset — that only gets attached once a Render step actually builds the page, not before.'
+    ? 'Carry the existing "designPlan" and "figmaFileUrl" fields through unchanged in your output — don\'t alter either.'
+    : 'Leave "designPlan" and "figmaFileUrl" unset — those only get attached once Render/Figma Push steps actually build the page, not before.'
   } Return structured data matching the required schema — no files to
 write for this step.`
 }
@@ -401,6 +415,72 @@ Return structured data matching the required schema — no files to write
 for this step.`
 }
 
+function figmaPushPrompt(intake, layout, render, outputDir, existingFigmaFileUrl, figmaPlanKey) {
+  const modeBlock = existingFigmaFileUrl
+    ? `\n\nThis page already has a REAL Figma file — you are UPDATING it, not
+creating a new one: ${existingFigmaFileUrl}
+Parse its fileKey from the URL. Use get_metadata (or a read-only
+use_figma script) to inspect the existing wrapper frame's structure
+first. Then, following the sections list below, ADD or UPDATE the nodes
+for every section whose status is "new" or "modified" (in their listed
+order) and leave every "unchanged" section's existing nodes exactly as
+they are — reuse the same colors/fonts already present in the file
+rather than re-deriving them. Load the figma-use skill (and
+figma-generate-design if building a full new section) before any
+use_figma call, per that tool's own requirement.`
+    : `\n\nThis page has NO Figma file yet — create one from scratch.
+Load the figma-create-new-file skill, then:
+1. Resolve planKey: ${figmaPlanKey ? `use "${figmaPlanKey}" directly` : 'call whoami; if there is exactly one plan, use its key; if there are several, pick the first and say so in your notes (this is a non-interactive run, so ask-the-user is not available) — do not fail the run over this'}.
+2. Call create_new_file with fileName "${layout.pageTitle}", the resolved
+   planKey, and editorType "design".
+3. Load the figma-use skill (mandatory before any use_figma call) and,
+   since this is a full composed page, also figma-generate-design.
+4. Build the page as a single top-level auto-layout wrapper frame
+   containing one child section per entry below, using
+   figma.createAutoLayout / figma.createText / figma.createRectangle per
+   the figma-use skill's rules (font loading via listAvailableFontsAsync
+   first — never guess a style name; colors in 0-1 range; append to an
+   auto-layout parent before setting HUG/FILL). This is a from-scratch
+   file with no published design system to import from, so build
+   manually — do not spend time on search_design_system.
+Work in retry-safe batches per the figma-use skill (e.g. one call for the
+wrapper + first couple of sections, a further call per remaining group of
+sections) rather than one giant script — a script this size is a common
+cause of silent truncation/timeouts.`
+
+  return `You are pushing this page's design to a REAL Figma file — this is
+the pipeline's actual final deliverable, not the local HTML mockup
+(which was only a fast intermediate artifact for the earlier review
+steps).
+${modeBlock}
+
+Page title: ${layout.pageTitle}
+Layout approach: ${layout.layoutNotes}
+Design plan to use for colors/typefaces: ${layout.designPlan ? `Colors: ${layout.designPlan.colors.join(', ')} | Typefaces: ${layout.designPlan.typefaces.join(', ')} | Layout concept: ${layout.designPlan.layoutConcept}` : '(none recorded — infer something reasonable and note that you did)'}
+Sections, in order (status shown per section):
+${layout.sections
+  .sort((a, b) => a.order - b.order)
+  .map(s => `${s.order}. [${s.type}] (${s.status || 'new'}) ${s.heading} — ${s.description}`)
+  .join('\n')}
+${render ? `\nA local HTML mockup of this same page already exists at ${render.htmlPath} (screenshot: ${render.screenshotPath}) — read/view it for visual reference (exact copy, spacing, content) if useful, but build REAL Figma nodes (text, frames, auto-layout), never an imported flattened image of it.` : ''}
+
+Page goal (for context, don't render this text literally): """${intake.pageGoal}"""
+
+When done, take ONE screenshot of the top-level wrapper frame to confirm
+it looks right (cropped/overlapping text, wrong colors) and fix anything
+broken with one targeted follow-up call rather than rebuilding.
+
+Finally, using your Read/Write tools, update ${outputDir}/layout.json:
+read its current contents, set/overwrite its "figmaFileUrl" field to the
+real URL you ended up with (node-id query param included), and write it
+back — this is what a LATER run reads to update this same Figma file
+instead of creating a new one.
+
+Return figmaFileUrl (a real openable URL including a node-id query param
+for the wrapper frame), figmaFileKey, figmaNodeId, and notes — matching
+the required schema.`
+}
+
 
 
 // One revision round for the Layout (Design Review) and one re-render
@@ -528,5 +608,20 @@ if (render) {
   }
 }
 
+phase('Figma Push')
+const targetFigmaFileUrl = (existingLayout && existingLayout.figmaFileUrl) || args.figmaTargetFileUrl || null
+let figmaPush = null
+if (render) {
+  figmaPush = await agent(
+    figmaPushPrompt(intake, layout, render, outputDir, targetFigmaFileUrl, args.figmaPlanKey),
+    { schema: FIGMA_PUSH_RESULT_SCHEMA, phase: 'Figma Push' }
+  )
+  if (!figmaPush) {
+    log('Figma Push failed to return a result — the local HTML mockup is the only artifact for this run.')
+  }
+} else {
+  log('No render to push — skipping Figma Push.')
+}
+
 phase('Report')
-return { existingLayout, figmaDesignPlan, intake, layout, layoutReview, render, critique }
+return { existingLayout, figmaDesignPlan, intake, layout, layoutReview, render, critique, figmaPush }

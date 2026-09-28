@@ -78,15 +78,24 @@ this pipeline — see `prompts/ticketToUi.js` for its (self-contained)
 prompts/schemas.
 
 Phases: Load Existing → Figma Tokens → Intake → Layout → **Design
-Review** → Render → **Quality Gate** → Report. Design Review is a
-Director-style pass over the Layout (checks it covers every `keyContent`
-item, catches invented scope, and — on an extend-run — that no existing
-section got silently dropped); Quality Gate is a Critic-style pass that
-reads the rendered HTML and screenshot back and re-renders once if it
-finds a blocking issue. Each loop is capped at 2 rounds — same shape as
-`auto-game-build`'s own Design Review / Quality Critic loops, just
-without a multi-task backlog or 5-round polish budget, since this is one
-page per run.
+Review** → Render → **Quality Gate** → **Figma Push** → Report. Design
+Review is a Director-style pass over the Layout (checks it covers every
+`keyContent` item, catches invented scope, and — on an extend-run — that
+no existing section got silently dropped); Quality Gate is a Critic-style
+pass that reads the rendered HTML and screenshot back and re-renders once
+if it finds a blocking issue. Each loop is capped at 2 rounds — same
+shape as `auto-game-build`'s own Design Review / Quality Critic loops,
+just without a multi-task backlog or 5-round polish budget, since this is
+one page per run.
+
+**The local HTML/screenshot render is an intermediate artifact**, used
+because it's fast and cheap for the Design Review / Quality Gate loop to
+iterate on. **The actual final deliverable is a real Figma file** — the
+Figma Push phase creates it (a fresh page) or updates it in place (an
+extend-run, via the `figmaFileUrl` persisted in `layout.json` from the
+prior run), using the Figma MCP connector's write tools
+(`create_new_file`, `use_figma`) to build real editable nodes (auto-layout
+frames, text, fills) — never a flattened screenshot pasted into Figma.
 
 ```
 Workflow({
@@ -125,14 +134,22 @@ Workflow({
 })
 ```
 
-This requires the Figma MCP connector connected for the session. It only
-*reads* Figma here (`get_variable_defs`, `get_design_context`,
-`get_screenshot`) — the connector can also write/create real Figma files
-(`create_new_file`, `use_figma`, confirmed working by hand), this pipeline
-just doesn't automate that push yet; wiring up a "Push to Figma" phase is
-a bigger lift (the figma-generate-design workflow: font discovery,
-retry-safe multi-call construction, design-system component search) than
-this spike currently covers.
+This (grounding in an existing file's tokens) requires the Figma MCP
+connector connected for the session and only *reads* Figma
+(`get_variable_defs`, `get_design_context`, `get_screenshot`) — separate
+from the Figma Push phase below, which *writes*.
+
+Pass `figmaTargetFileUrl` to push into a specific existing Figma file on
+a **fresh** run (instead of creating a new one), and `figmaPlanKey` (a
+Figma team/org key, e.g. `"team::1234567890"`) if the account has more
+than one plan and it isn't resolvable automatically:
+
+```
+Workflow({
+  scriptPath: "workflows/ticket-to-ui.js",
+  args: { ticket: "...", outputDir: "/tmp/ticket-to-ui-demo", figmaTargetFileUrl: "https://www.figma.com/design/<fileKey>/..." }
+})
+```
 
 ## Known Limitations
 
