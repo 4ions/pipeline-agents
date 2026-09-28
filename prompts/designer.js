@@ -99,6 +99,22 @@ implement it. Every task MUST have:
   launch task starts — but two ml-training-* tasks are never run in
   parallel, and ordering between the three is exactly the order you
   write them in.
+- CRITICAL — requiresExclusiveEditor: leave this unset (defaults to false)
+  for virtually every task, including ordinary tasks that use Play Mode
+  to test one feature — those are fine running concurrently with each
+  other against the shared Unity Editor. Set it true ONLY for a task
+  whose successCriterion itself requires one continuous, uninterrupted
+  Play Mode session end-to-end (a whole-game/full-loop regression pass
+  spanning multiple scenes/systems, worded like "the entire loop
+  completes in one continuous Play Mode session"). Such a task cannot be
+  validly verified while ANY other task's agent is also entering/exiting
+  Play Mode, loading a scene, or triggering a recompile on the same
+  shared editor mid-session — the workflow runs every requiresExclusiveEditor
+  task strictly one at a time, after the rest of that milestone's
+  concurrent standard tasks have all finished, specifically so it gets an
+  uncontended editor. Do not set this on more than one or two tasks per
+  milestone, and never on a task that only needs Play Mode for a single
+  feature check.
 
 HARD RULE — shared state gets ONE owner, everyone else reads it: whenever
 more than one task will need the same underlying concept (world/level

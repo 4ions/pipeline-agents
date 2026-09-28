@@ -19,6 +19,19 @@ Do not just re-read the text above and trust it — previous agents have
 been wrong before. Open the scene yourself, enter Play Mode, and actually
 play through the whole thing with capture_game_view at several points.
 
+NEVER start a Test Runner run (TestRunnerApi.Execute, Tmp/RunEdit, Tmp/RunPlay) or enter Play Mode from code while an open scene is modified: Unity then shows a blocking "Scene(s) Have Been Modified" dialog that freezes the editor and every MCP call until a human clicks it. Before any such start, make the scene clean: save the changes you intend to keep with EditorSceneManager.SaveOpenScenes() (only scenes that already have a path), or discard stray or temporary changes by reloading with EditorSceneManager.OpenScene("Assets/Scenes/Main.unity", OpenSceneMode.Single), and confirm SceneManager.GetActiveScene().isDirty is false. Never leave temporary test values (a lowered populationCap, a changed spawnCount, probe objects) in a scene you save.
+
+NEVER open a native operating-system dialog in Unity. Do NOT call execute_menu_item with any menu path that opens one: File/Open Scene, File/Open Project, File/Save As, File/Save Scene As, File/New Scene on an unsaved scene, Assets/Import Package, Assets/Import New Asset, or any menu entry ending in '...' that asks for a file or folder. Do NOT call EditorUtility.OpenFilePanel, OpenFolderPanel, SaveFilePanel, SaveFolderPanel or DisplayDialog from execute_code. A native dialog freezes the entire Unity editor and every MCP call until a human clicks it, stops the whole pipeline, and has already done so several times. To open the project scene use execute_code with EditorSceneManager.OpenScene("Assets/Scenes/Main.unity", OpenSceneMode.Single); to save use EditorSceneManager.SaveScene(scene) only on a scene that already has a path.
+
+If the funplay MCP tools are missing or disconnected in this session, that is a client-side
+glitch and the Unity editor is still running. Do NOT fall back to a code-only review because of it,
+and do not wait for anyone to reconnect. Call the same tool through Bash from the project root
+instead: ./.pipeline/unity-mcp.sh <tool_name> '<json arguments>' (for example
+./.pipeline/unity-mcp.sh enter_play_mode or ./.pipeline/unity-mcp.sh capture_game_view
+'{"save_to_file":true}'; ./.pipeline/unity-mcp.sh --list prints every tool). It takes the same
+arguments as the MCP tools and retries by itself while Unity reloads its domain. Only report Unity
+as unreachable if that helper itself fails after its retries.
+
 Do NOT limit yourself to a fixed checklist — a checklist only catches the
 specific bugs someone already thought of, and a genuinely mediocre game
 can fail in ways nobody wrote down in advance. Instead, actually inhabit

@@ -73,6 +73,18 @@ get_asset_import_settings/set_asset_import_settings to confirm/force
 Texture Type = "Sprite" (2D and UI) before assigning it — a freshly
 copied-in PNG is not guaranteed to import as a sprite by default.
 
+NEVER start a Test Runner run (TestRunnerApi.Execute, Tmp/RunEdit, Tmp/RunPlay) or enter Play Mode from code while an open scene is modified: Unity then shows a blocking "Scene(s) Have Been Modified" dialog that freezes the editor and every MCP call until a human clicks it. Before any such start, make the scene clean: save the changes you intend to keep with EditorSceneManager.SaveOpenScenes() (only scenes that already have a path), or discard stray or temporary changes by reloading with EditorSceneManager.OpenScene("Assets/Scenes/Main.unity", OpenSceneMode.Single), and confirm SceneManager.GetActiveScene().isDirty is false. Never leave temporary test values (a lowered populationCap, a changed spawnCount, probe objects) in a scene you save.
+
+NEVER open a native operating-system dialog in Unity. Do NOT call execute_menu_item with any menu path that opens one: File/Open Scene, File/Open Project, File/Save As, File/Save Scene As, File/New Scene on an unsaved scene, Assets/Import Package, Assets/Import New Asset, or any menu entry ending in '...' that asks for a file or folder. Do NOT call EditorUtility.OpenFilePanel, OpenFolderPanel, SaveFilePanel, SaveFolderPanel or DisplayDialog from execute_code. A native dialog freezes the entire Unity editor and every MCP call until a human clicks it, stops the whole pipeline, and has already done so several times. To open the project scene use execute_code with EditorSceneManager.OpenScene("Assets/Scenes/Main.unity", OpenSceneMode.Single); to save use EditorSceneManager.SaveScene(scene) only on a scene that already has a path.
+
+If the funplay MCP tools are missing or disconnected in this session, that is a client-side
+glitch and the Unity editor is still running. Do NOT report BLOCKED / NOT TESTED / INCONCLUSIVE
+because of it, and do not wait for anyone to reconnect. Call the same tool through Bash from the
+project root instead: ./.pipeline/unity-mcp.sh <tool_name> '<json arguments>'
+(for example ./.pipeline/unity-mcp.sh get_editor_state; ./.pipeline/unity-mcp.sh --list prints
+every tool). It takes the same arguments as the MCP tools and retries by itself while Unity
+reloads its domain. Only report Unity as unreachable if that helper itself fails after its retries.
+
 Use the funplay-unity MCP tools for the Unity-side wiring (search for
 "funplay" if you don't see them yet — relevant ones: add_component,
 set_component_property/set_component_properties, get_asset_import_settings/
@@ -201,6 +213,18 @@ styles in the same game reads as unfinished:
    total length below.
 Note the exact frame count you used per state in your summary — the
 Programmer's review step will check for this.
+
+NEVER start a Test Runner run (TestRunnerApi.Execute, Tmp/RunEdit, Tmp/RunPlay) or enter Play Mode from code while an open scene is modified: Unity then shows a blocking "Scene(s) Have Been Modified" dialog that freezes the editor and every MCP call until a human clicks it. Before any such start, make the scene clean: save the changes you intend to keep with EditorSceneManager.SaveOpenScenes() (only scenes that already have a path), or discard stray or temporary changes by reloading with EditorSceneManager.OpenScene("Assets/Scenes/Main.unity", OpenSceneMode.Single), and confirm SceneManager.GetActiveScene().isDirty is false. Never leave temporary test values (a lowered populationCap, a changed spawnCount, probe objects) in a scene you save.
+
+NEVER open a native operating-system dialog in Unity. Do NOT call execute_menu_item with any menu path that opens one: File/Open Scene, File/Open Project, File/Save As, File/Save Scene As, File/New Scene on an unsaved scene, Assets/Import Package, Assets/Import New Asset, or any menu entry ending in '...' that asks for a file or folder. Do NOT call EditorUtility.OpenFilePanel, OpenFolderPanel, SaveFilePanel, SaveFolderPanel or DisplayDialog from execute_code. A native dialog freezes the entire Unity editor and every MCP call until a human clicks it, stops the whole pipeline, and has already done so several times. To open the project scene use execute_code with EditorSceneManager.OpenScene("Assets/Scenes/Main.unity", OpenSceneMode.Single); to save use EditorSceneManager.SaveScene(scene) only on a scene that already has a path.
+
+If the funplay MCP tools are missing or disconnected in this session, that is a client-side
+glitch and the Unity editor is still running. Do NOT report BLOCKED / NOT TESTED / INCONCLUSIVE
+because of it, and do not wait for anyone to reconnect. Call the same tool through Bash from the
+project root instead: ./.pipeline/unity-mcp.sh <tool_name> '<json arguments>'
+(for example ./.pipeline/unity-mcp.sh get_editor_state; ./.pipeline/unity-mcp.sh --list prints
+every tool). It takes the same arguments as the MCP tools and retries by itself while Unity
+reloads its domain. Only report Unity as unreachable if that helper itself fails after its retries.
 
 Use the funplay-unity MCP tools for the Unity-side wiring:
 create_animator_controller, create_animation_clip, assign_animator,

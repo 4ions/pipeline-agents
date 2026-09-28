@@ -189,9 +189,23 @@ async function implementAndVerifyMlTrainingTask(task, targetProjectPath, vision,
 // the chain is skipped (marked blocked) rather than run against a
 // failed launch/monitor. Results come back in the caller's original
 // task order.
+//
+// A task.requiresExclusiveEditor task (a whole-game/full-loop regression
+// whose successCriterion itself demands one continuous, uninterrupted
+// Play Mode session) is pulled out of the concurrent standard batch for
+// the same reason the ML chain is: it cannot be validly verified while
+// any sibling agent is also entering/exiting Play Mode, loading a scene,
+// or triggering a recompile against the same shared Unity Editor. Every
+// other standard task (including the ML chain) runs to completion FIRST,
+// so the editor is uncontended by the time these run; they then run
+// strictly one at a time, in backlog order, same as the ML chain. This
+// fixes a real, repeatedly-recurring failure mode (bug-m15t12-shared-editor-contention)
+// where a full-loop regression task kept losing pass/fail attribution to
+// concurrent sibling agents driving Play Mode on the same bridge.
 async function runImplementationTasks(tasks, targetProjectPath, vision, reopenReasonFor) {
   const reasonOf = (task) => (reopenReasonFor ? reopenReasonFor(task) : undefined)
-  const standardTasks = tasks.filter(t => !t.taskKind || t.taskKind === 'standard')
+  const standardTasks = tasks.filter(t => (!t.taskKind || t.taskKind === 'standard') && !t.requiresExclusiveEditor)
+  const exclusiveTasks = tasks.filter(t => (!t.taskKind || t.taskKind === 'standard') && !!t.requiresExclusiveEditor)
   const mlTasks = tasks.filter(t => t.taskKind && t.taskKind !== 'standard')
 
   const standardResults = await pipeline(
@@ -222,7 +236,18 @@ async function runImplementationTasks(tasks, targetProjectPath, vision, reopenRe
     if (!result || result.status === 'blocked') chainBroken = task.id
   }
 
-  const byId = new Map([...standardResults, ...mlResults].filter(Boolean).map(r => [r.task.id, r]))
+  // Every concurrent/chained task above has now fully settled (the awaits
+  // resolved), so no sibling agent from THIS runImplementationTasks call
+  // is still driving Play Mode. Run the exclusive-editor tasks one at a
+  // time against that now-uncontended editor.
+  const exclusiveResults = []
+  for (const task of exclusiveTasks) {
+    log(`Running requiresExclusiveEditor task ${task.id} alone, after all concurrent tasks in this batch have settled, so it gets an uncontended Unity Editor for its single continuous Play Mode session.`)
+    const result = await implementAndTestTask(task, targetProjectPath, vision, reasonOf(task))
+    exclusiveResults.push(result)
+  }
+
+  const byId = new Map([...standardResults, ...mlResults, ...exclusiveResults].filter(Boolean).map(r => [r.task.id, r]))
   return tasks.map(t => byId.get(t.id)).filter(Boolean)
 }
 

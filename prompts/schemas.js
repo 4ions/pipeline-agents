@@ -25,6 +25,10 @@ export const BACKLOG_TASK_SCHEMA = {
       enum: ['standard', 'ml-training-launch', 'ml-training-monitor', 'ml-training-integrate-verify'],
       description: 'Defaults to "standard" (the normal Programmer/Artist/Tester implementation cycle) when omitted — every task in every other milestone this pipeline has ever built is "standard". Only set this for a milestone specifically about ML-Agents training: "ml-training-launch" for the task that exports a standalone build and starts an mlagents-learn run in the background; "ml-training-monitor" for the task that polls that run\'s convergence and decides when to stop it; "ml-training-integrate-verify" for the task that assigns the resulting trained model and verifies its measured hunt/evasion success rates via real Play Mode.',
     },
+    requiresExclusiveEditor: {
+      type: 'boolean',
+      description: 'Set true ONLY for a task whose successCriterion itself demands one continuous, uninterrupted Play Mode session end-to-end (a full-loop/whole-game regression pass, e.g. "the entire loop completes in one continuous Play Mode session with zero console errors") — a criterion that is unverifiable if any other task\'s agent enters/exits Play Mode, loads a scene, or triggers a recompile on the same shared Unity Editor at any point during it. All other tasks, including ordinary ones that also use Play Mode to test one feature, default to false/omitted and run in the normal concurrent batch — this flag is specifically about session CONTINUITY being part of the pass/fail condition, not about whether Play Mode is used at all.',
+    },
   },
 }
 
