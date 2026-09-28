@@ -68,13 +68,14 @@ a new one will pick up in-progress work rather than starting over (see
 Vision/Design pass; incremental resume of an in-progress backlog is
 follow-up work, not covered by this plan).
 
-## Ticket → UI wireframe (spike)
+## Ticket → UI mockup (spike)
 
 `workflows/ticket-to-ui.js` reuses this repo's agentic pattern (`Workflow`
 + `agent()` + JSON schema + `phase()`) for a different domain: given a raw
-ticket description, produce a quick visual wireframe of the page it calls
-for. It shares no code or Unity dependency with the rest of this pipeline
-— see `prompts/ticketToUi.js` for its (self-contained) prompts/schemas.
+ticket description, produce a static HTML/CSS mockup (+ screenshot) of the
+page it calls for. It shares no code or Unity dependency with the rest of
+this pipeline — see `prompts/ticketToUi.js` for its (self-contained)
+prompts/schemas.
 
 Deliberately minimal: one pass (Intake → Layout → Render), no design
 review loop, no quality-critique loop — a spike to demonstrate the
@@ -84,6 +85,24 @@ approach, not a production feature.
 Workflow({
   scriptPath: "workflows/ticket-to-ui.js",
   args: { ticket: "As a user I want a page listing my recent orders...", outputDir: "/tmp/ticket-to-ui-demo" }
+})
+```
+
+Each render writes `<outputDir>/wireframe.html`, `wireframe.png`, and
+`layout.json` (the section layout + the design plan — palette/typefaces
+— it used). Pass `existingOutputDir` (pointing at a prior run's
+`outputDir`) to add a new feature onto a page this pipeline already
+built instead of starting over: it loads that `layout.json`, asks only
+what the new ticket adds or changes, and re-renders reusing the same
+design plan so the extended page stays visually consistent. Omit
+`outputDir` in that case to update the page in place, or set it to write
+the extended version elsewhere while still reading the original as
+reference:
+
+```
+Workflow({
+  scriptPath: "workflows/ticket-to-ui.js",
+  args: { ticket: "Also let me search my past orders by date range", existingOutputDir: "/tmp/ticket-to-ui-demo" }
 })
 ```
 
