@@ -10,7 +10,9 @@ export const meta = {
     { title: 'Figma Tokens' },
     { title: 'Intake' },
     { title: 'Layout' },
+    { title: 'Design Review' },
     { title: 'Render' },
+    { title: 'Quality Gate' },
     { title: 'Report' },
   ],
 }
@@ -31,13 +33,26 @@ export const meta = {
 // instead of re-designing it from scratch.
 //
 // Optional args.figmaFileUrl grounds a FRESH page's design plan in a real
-// Figma file's own tokens/typefaces instead of an invented palette — via
-// the Figma MCP connector's read-only tools (get_variable_defs /
-// get_design_context / get_screenshot; there is no write/create-in-Figma
-// tool, so this is one-directional: Figma -> mockup, never the reverse).
-// Ignored when existingOutputDir is set — an extend-run's own prior
-// design plan wins, for visual continuity with the page it's adding onto.
-// Scope is still intentionally minimal — no review/critique loop.
+// Figma file's own tokens/typefaces instead of an invented palette, via
+// the Figma MCP connector's read tools (get_variable_defs /
+// get_design_context / get_screenshot). Ignored when existingOutputDir is
+// set — an extend-run's own prior design plan wins, for visual continuity
+// with the page it's adding onto.
+//
+// NOTE: the Figma MCP connector can also WRITE (create_new_file,
+// use_figma) — confirmed by hand by creating a real Figma file from this
+// pipeline's own design plan/content (see the commit message for this
+// change). This pipeline doesn't automate that push yet — the figma-use /
+// figma-generate-design workflow is a substantially bigger lift (font
+// discovery, retry-safe multi-call construction, design-system component
+// search) than this spike's scope — but it is NOT one-directional the way
+// an earlier version of this comment claimed.
+//
+// Design Review (a Director-style pass over the Layout, bounded retries)
+// and a Quality Gate (a Critic-style pass over the rendered mockup,
+// bounded re-renders) mirror the auto-game-build pipeline's own
+// Design-Review/Quality-Critic loops — same shape, adapted to this
+// domain's single-page-per-run model instead of a multi-task backlog.
 
 const TICKET_INTAKE_SCHEMA = {
   type: 'object',
@@ -84,6 +99,37 @@ const UI_LAYOUT_SCHEMA = {
     layoutNotes: { type: 'string', description: 'Overall layout approach, e.g. "single column" or "sidebar + main content"' },
     sections: { type: 'array', items: UI_SECTION_SCHEMA },
     designPlan: { ...DESIGN_PLAN_SCHEMA, description: 'Only present once a Render step has run at least once for this page — carried forward so a later extend-run reuses the same palette/type instead of inventing a new one' },
+  },
+}
+
+const LAYOUT_REVIEW_SCHEMA = {
+  type: 'object',
+  required: ['approved', 'feedback'],
+  properties: {
+    approved: { type: 'boolean' },
+    feedback: {
+      type: 'string',
+      description: 'If approved, a short confirmation. If not, specific, actionable gaps — a missing keyContent item, an invented section the ticket never asked for, a broken/lost existing section on an extend-run — not a vague "make it better."',
+    },
+  },
+}
+
+const MOCKUP_CRITIQUE_SCHEMA = {
+  type: 'object',
+  required: ['acceptable', 'issues'],
+  properties: {
+    acceptable: { type: 'boolean', description: 'true ONLY if genuinely nothing worth fixing was found' },
+    issues: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['description', 'severity'],
+        properties: {
+          description: { type: 'string', description: 'Specific enough to act on — name the actual visual/content problem, not a vague generality' },
+          severity: { type: 'string', enum: ['blocking', 'polish'] },
+        },
+      },
+    },
   },
 }
 
@@ -161,7 +207,7 @@ structured data matching the required schema — no files to write for this
 step.`
 }
 
-function uiLayoutPrompt(intake, existingLayout) {
+function uiLayoutPrompt(intake, existingLayout, reviewFeedback) {
   const existingBlock = existingLayout
     ? `\n\nThis page ALREADY EXISTS with this layout — you are EXTENDING it,
 not designing from scratch:
@@ -177,6 +223,12 @@ sections' relative order stable. Never silently drop an existing section.`
     : `\n\nEvery section you write is being designed fresh for a brand-new
 page — set each one's status to "new".`
 
+  const reviewBlock = reviewFeedback
+    ? `\n\nA reviewer already looked at a previous version of this layout and
+sent it back with this feedback — revise to address it specifically,
+don't just resubmit the same layout: """${reviewFeedback}"""`
+    : ''
+
   return `You are a UI designer turning this page intake into a concrete
 section-by-section layout.
 
@@ -184,6 +236,7 @@ Page goal: """${intake.pageGoal}"""
 Key content the ticket calls for: ${intake.keyContent.join(', ')}
 Priorities: ${intake.priorities.join(', ')}
 ${existingBlock}
+${reviewBlock}
 
 Break the page into an ordered list of sections (nav, hero, form, list,
 card-grid, table, sidebar, cta, text, footer, or custom) that together
@@ -199,7 +252,43 @@ than "a card grid"). ${existingLayout
 write for this step.`
 }
 
-function wireframeRenderPrompt(intake, layout, outputDir, existingOutputDir, figmaDesignPlan) {
+function layoutReviewPrompt(intake, layout, existingLayout) {
+  const extendBlock = existingLayout
+    ? `\n\nThis is an EXTEND-run — check specifically that every section from
+the existing layout below is still present (status "unchanged" or
+"modified", never silently dropped), and that any status "new"/"modified"
+sections are genuinely justified by the ticket, not scope creep:
+${JSON.stringify(existingLayout.sections.map(s => ({ id: s.id, heading: s.heading })), null, 2)}`
+    : ''
+
+  return `You are a SENIOR product designer reviewing a junior designer's
+page layout before it gets built — the kind of review that catches a
+missing requirement or invented scope before engineering time is spent on
+it, not a rubber stamp.
+
+Page goal: """${intake.pageGoal}"""
+Key content the ticket calls for: ${intake.keyContent.join(', ')}
+Priorities: ${intake.priorities.join(', ')}
+${extendBlock}
+
+Proposed layout:
+Page title: ${layout.pageTitle}
+Layout approach: ${layout.layoutNotes}
+Sections:
+${layout.sections
+  .sort((a, b) => a.order - b.order)
+  .map(s => `${s.order}. [${s.type}] (${s.status || 'new'}) ${s.heading} — ${s.description}`)
+  .join('\n')}
+
+Check: does every item in "Key content" map to a concrete section? Is any
+section pure invented scope the ticket never asked for? Is any section's
+description too vague to build from as-is? On an extend-run, was any
+existing section dropped or overwritten without the ticket asking for it?
+Approve only if none of these problems exist. Return structured data
+matching the required schema — no files to write for this step.`
+}
+
+function wireframeRenderPrompt(intake, layout, outputDir, existingOutputDir, figmaDesignPlan, fixFeedback) {
   const modeBlock = existingOutputDir
     ? `\n\nYou are EXTENDING an existing static HTML mockup, not building a
 fresh one. Read the existing file at ${existingOutputDir}/wireframe.html
@@ -248,6 +337,11 @@ ${layout.sections
   .map(s => `${s.order}. [${s.type}] (${s.status || 'new'}) ${s.heading} — ${s.description}`)
   .join('\n')}
 ${existingOutputDir && layout.designPlan ? `\nExisting design plan to reuse verbatim:\nColors: ${layout.designPlan.colors.join(', ')}\nTypefaces: ${layout.designPlan.typefaces.join(', ')}\nLayout concept: ${layout.designPlan.layoutConcept}` : ''}
+${fixFeedback ? `\n\nA quality reviewer found real problems with the CURRENT version of
+this exact page (already written to ${outputDir}/wireframe.html) — read
+that file first, then fix ONLY these specific issues in place, don't
+rebuild from scratch and don't change anything the issues don't mention:
+"""${fixFeedback}"""` : ''}
 
 Page goal (for context, don't render this text literally): """${intake.pageGoal}"""
 
@@ -274,7 +368,46 @@ Steps:
    anything you simplified or skipped, matching the required schema.`
 }
 
+function mockupCritiquePrompt(intake, layout, render) {
+  return `You are a SENIOR product designer doing final QA on a rendered
+mockup before it ships to a demo — the kind of review that catches a
+missing section or a broken layout, not a rubber stamp.
 
+Page goal: """${intake.pageGoal}"""
+Sections this mockup is supposed to contain, in order:
+${layout.sections
+  .sort((a, b) => a.order - b.order)
+  .map(s => `${s.order}. [${s.type}] ${s.heading} — ${s.description}`)
+  .join('\n')}
+
+Read the HTML at ${render.htmlPath} AND look at the screenshot at
+${render.screenshotPath} (use your Read tool on both — the screenshot is
+an image, read it directly). Check for:
+- Any section above that's missing, empty, or clearly not what its
+  description called for.
+- Visual bugs: cropped/clipped text, overlapping elements, placeholder
+  text left un-filled ("Lorem ipsum", "Title", "Heading").
+- Content that contradicts the page goal or looks obviously wrong (a
+  status badge with the wrong color mapping, a number that doesn't make
+  sense).
+- Generic AI-design smells: a purple-to-blue gradient hero, everything
+  centered, Inter/Space Grotesk used with no apparent reason, emoji as
+  section markers.
+
+Mark each real problem "blocking" if it would embarrass this in a demo,
+"polish" if it's a minor nitpick not worth a re-render over. Return
+acceptable: true ONLY if you genuinely found nothing worth flagging.
+Return structured data matching the required schema — no files to write
+for this step.`
+}
+
+
+
+// One revision round for the Layout (Design Review) and one re-render
+// round for the mockup (Quality Gate) — enough to catch the obvious
+// misses without turning a spike into an open-ended polish loop.
+const MAX_LAYOUT_REVIEW_ROUNDS = 2
+const MAX_RENDER_POLISH_ROUNDS = 2
 
 phase('Load Existing')
 let existingLayout = null
@@ -313,24 +446,87 @@ if (!intake) {
 }
 
 phase('Layout')
-const layout = await agent(uiLayoutPrompt(intake, existingLayout), {
+let layout = await agent(uiLayoutPrompt(intake, existingLayout), {
   schema: UI_LAYOUT_SCHEMA,
   phase: 'Layout',
+  label: 'layout:1',
 })
 if (!layout || !Array.isArray(layout.sections) || layout.sections.length === 0) {
   log('Failed to produce a section layout — aborting.')
   return { existingLayout, intake, error: 'layout_failed' }
 }
 
+phase('Design Review')
+let layoutReview = null
+for (let round = 1; round <= MAX_LAYOUT_REVIEW_ROUNDS; round++) {
+  layoutReview = await agent(layoutReviewPrompt(intake, layout, existingLayout), {
+    schema: LAYOUT_REVIEW_SCHEMA,
+    phase: 'Design Review',
+    label: `layout-review:${round}`,
+  })
+  if (!layoutReview) {
+    log('Design reviewer failed to return a result — proceeding with the unreviewed layout.')
+    break
+  }
+  if (layoutReview.approved) break
+  if (round === MAX_LAYOUT_REVIEW_ROUNDS) {
+    log(`Design review round ${round}: still not approved after ${MAX_LAYOUT_REVIEW_ROUNDS} round(s) — proceeding with the latest layout anyway rather than blocking indefinitely.`)
+    break
+  }
+  log(`Design review round ${round}: sent back — ${layoutReview.feedback}`)
+  const revised = await agent(uiLayoutPrompt(intake, existingLayout, layoutReview.feedback), {
+    schema: UI_LAYOUT_SCHEMA,
+    phase: 'Design Review',
+    label: `layout:${round + 1}`,
+  })
+  if (!revised || !Array.isArray(revised.sections) || revised.sections.length === 0) {
+    log('Revised layout failed to generate — keeping the previous version.')
+    break
+  }
+  layout = revised
+}
+
 phase('Render')
 const outputDir = args.outputDir || args.existingOutputDir
-const render = await agent(
+let render = await agent(
   wireframeRenderPrompt(intake, layout, outputDir, existingLayout ? args.existingOutputDir : null, figmaDesignPlan),
-  { schema: RENDER_RESULT_SCHEMA, phase: 'Render' }
+  { schema: RENDER_RESULT_SCHEMA, phase: 'Render', label: 'render:1' }
 )
 if (!render) {
   log('Failed to render the mockup — no HTML/screenshot produced.')
 }
 
+phase('Quality Gate')
+let critique = null
+if (render) {
+  for (let round = 1; round <= MAX_RENDER_POLISH_ROUNDS; round++) {
+    critique = await agent(mockupCritiquePrompt(intake, layout, render), {
+      schema: MOCKUP_CRITIQUE_SCHEMA,
+      phase: 'Quality Gate',
+      label: `critique:${round}`,
+    })
+    if (!critique) {
+      log('Quality Critic failed to return a result — reporting the render as unverified.')
+      break
+    }
+    if (critique.acceptable) break
+    const blocking = critique.issues.filter(i => i.severity === 'blocking')
+    if (blocking.length === 0) break // only polish-level nitpicks — not worth a re-render
+    if (round === MAX_RENDER_POLISH_ROUNDS) {
+      log(`Quality gate round ${round}: still has blocking issue(s) after ${MAX_RENDER_POLISH_ROUNDS} round(s) — reporting as-is rather than looping forever.`)
+      break
+    }
+    log(`Quality gate round ${round}: ${blocking.length} blocking issue(s) — re-rendering: ${blocking.map(i => i.description).join('; ')}`)
+    const fixed = await agent(
+      wireframeRenderPrompt(
+        intake, layout, outputDir, existingLayout ? args.existingOutputDir : null, figmaDesignPlan,
+        blocking.map(i => i.description).join('; ')
+      ),
+      { schema: RENDER_RESULT_SCHEMA, phase: 'Quality Gate', label: `render-fix:${round}` }
+    )
+    if (fixed) render = fixed
+  }
+}
+
 phase('Report')
-return { existingLayout, figmaDesignPlan, intake, layout, render }
+return { existingLayout, figmaDesignPlan, intake, layout, layoutReview, render, critique }

@@ -4,9 +4,12 @@
 // result to workflows/ticket-to-ui.js. Regenerate after any
 // prompts/ticketToUi.js change with: node bin/build-workflow.js
 //
-// Spike: one ticket -> one mockup, single pass, no review/critique loop by
-// design (see prompts/ticketToUi.js header for why this stays isolated
-// from the rest of this repo's Unity game-build pipeline).
+// Spike: one ticket -> one mockup. Design Review (a Director-style pass
+// over the Layout) and a Quality Gate (a Critic-style pass over the
+// rendered mockup) each run bounded, small retry loops — mirroring the
+// auto-game-build pipeline's own review loops (see
+// prompts/ticketToUi.js header) — but there is still no per-task backlog
+// or multi-round polish like that pipeline; this is one page per run.
 //
 // args.existingOutputDir (optional): a previous run's outputDir, to add a
 // new feature onto a page this pipeline already built instead of starting
@@ -27,10 +30,18 @@ export const meta = {
     { title: 'Figma Tokens' },
     { title: 'Intake' },
     { title: 'Layout' },
+    { title: 'Design Review' },
     { title: 'Render' },
+    { title: 'Quality Gate' },
     { title: 'Report' },
   ],
 }
+
+// One revision round for the Layout (Design Review) and one re-render
+// round for the mockup (Quality Gate) — enough to catch the obvious
+// misses without turning a spike into an open-ended polish loop.
+const MAX_LAYOUT_REVIEW_ROUNDS = 2
+const MAX_RENDER_POLISH_ROUNDS = 2
 
 phase('Load Existing')
 let existingLayout = null
@@ -69,24 +80,87 @@ if (!intake) {
 }
 
 phase('Layout')
-const layout = await agent(uiLayoutPrompt(intake, existingLayout), {
+let layout = await agent(uiLayoutPrompt(intake, existingLayout), {
   schema: UI_LAYOUT_SCHEMA,
   phase: 'Layout',
+  label: 'layout:1',
 })
 if (!layout || !Array.isArray(layout.sections) || layout.sections.length === 0) {
   log('Failed to produce a section layout — aborting.')
   return { existingLayout, intake, error: 'layout_failed' }
 }
 
+phase('Design Review')
+let layoutReview = null
+for (let round = 1; round <= MAX_LAYOUT_REVIEW_ROUNDS; round++) {
+  layoutReview = await agent(layoutReviewPrompt(intake, layout, existingLayout), {
+    schema: LAYOUT_REVIEW_SCHEMA,
+    phase: 'Design Review',
+    label: `layout-review:${round}`,
+  })
+  if (!layoutReview) {
+    log('Design reviewer failed to return a result — proceeding with the unreviewed layout.')
+    break
+  }
+  if (layoutReview.approved) break
+  if (round === MAX_LAYOUT_REVIEW_ROUNDS) {
+    log(`Design review round ${round}: still not approved after ${MAX_LAYOUT_REVIEW_ROUNDS} round(s) — proceeding with the latest layout anyway rather than blocking indefinitely.`)
+    break
+  }
+  log(`Design review round ${round}: sent back — ${layoutReview.feedback}`)
+  const revised = await agent(uiLayoutPrompt(intake, existingLayout, layoutReview.feedback), {
+    schema: UI_LAYOUT_SCHEMA,
+    phase: 'Design Review',
+    label: `layout:${round + 1}`,
+  })
+  if (!revised || !Array.isArray(revised.sections) || revised.sections.length === 0) {
+    log('Revised layout failed to generate — keeping the previous version.')
+    break
+  }
+  layout = revised
+}
+
 phase('Render')
 const outputDir = args.outputDir || args.existingOutputDir
-const render = await agent(
+let render = await agent(
   wireframeRenderPrompt(intake, layout, outputDir, existingLayout ? args.existingOutputDir : null, figmaDesignPlan),
-  { schema: RENDER_RESULT_SCHEMA, phase: 'Render' }
+  { schema: RENDER_RESULT_SCHEMA, phase: 'Render', label: 'render:1' }
 )
 if (!render) {
   log('Failed to render the mockup — no HTML/screenshot produced.')
 }
 
+phase('Quality Gate')
+let critique = null
+if (render) {
+  for (let round = 1; round <= MAX_RENDER_POLISH_ROUNDS; round++) {
+    critique = await agent(mockupCritiquePrompt(intake, layout, render), {
+      schema: MOCKUP_CRITIQUE_SCHEMA,
+      phase: 'Quality Gate',
+      label: `critique:${round}`,
+    })
+    if (!critique) {
+      log('Quality Critic failed to return a result — reporting the render as unverified.')
+      break
+    }
+    if (critique.acceptable) break
+    const blocking = critique.issues.filter(i => i.severity === 'blocking')
+    if (blocking.length === 0) break // only polish-level nitpicks — not worth a re-render
+    if (round === MAX_RENDER_POLISH_ROUNDS) {
+      log(`Quality gate round ${round}: still has blocking issue(s) after ${MAX_RENDER_POLISH_ROUNDS} round(s) — reporting as-is rather than looping forever.`)
+      break
+    }
+    log(`Quality gate round ${round}: ${blocking.length} blocking issue(s) — re-rendering: ${blocking.map(i => i.description).join('; ')}`)
+    const fixed = await agent(
+      wireframeRenderPrompt(
+        intake, layout, outputDir, existingLayout ? args.existingOutputDir : null, figmaDesignPlan,
+        blocking.map(i => i.description).join('; ')
+      ),
+      { schema: RENDER_RESULT_SCHEMA, phase: 'Quality Gate', label: `render-fix:${round}` }
+    )
+    if (fixed) render = fixed
+  }
+}
+
 phase('Report')
-return { existingLayout, figmaDesignPlan, intake, layout, render }
+return { existingLayout, figmaDesignPlan, intake, layout, layoutReview, render, critique }

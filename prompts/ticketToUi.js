@@ -28,7 +28,12 @@
 // discovery, retry-safe multi-call construction, design-system component
 // search) than this spike's scope — but it is NOT one-directional the way
 // an earlier version of this comment claimed.
-// Scope is still intentionally minimal — no review/critique loop.
+//
+// Design Review (a Director-style pass over the Layout, bounded retries)
+// and a Quality Gate (a Critic-style pass over the rendered mockup,
+// bounded re-renders) mirror the auto-game-build pipeline's own
+// Design-Review/Quality-Critic loops — same shape, adapted to this
+// domain's single-page-per-run model instead of a multi-task backlog.
 
 export const TICKET_INTAKE_SCHEMA = {
   type: 'object',
@@ -75,6 +80,37 @@ export const UI_LAYOUT_SCHEMA = {
     layoutNotes: { type: 'string', description: 'Overall layout approach, e.g. "single column" or "sidebar + main content"' },
     sections: { type: 'array', items: UI_SECTION_SCHEMA },
     designPlan: { ...DESIGN_PLAN_SCHEMA, description: 'Only present once a Render step has run at least once for this page — carried forward so a later extend-run reuses the same palette/type instead of inventing a new one' },
+  },
+}
+
+export const LAYOUT_REVIEW_SCHEMA = {
+  type: 'object',
+  required: ['approved', 'feedback'],
+  properties: {
+    approved: { type: 'boolean' },
+    feedback: {
+      type: 'string',
+      description: 'If approved, a short confirmation. If not, specific, actionable gaps — a missing keyContent item, an invented section the ticket never asked for, a broken/lost existing section on an extend-run — not a vague "make it better."',
+    },
+  },
+}
+
+export const MOCKUP_CRITIQUE_SCHEMA = {
+  type: 'object',
+  required: ['acceptable', 'issues'],
+  properties: {
+    acceptable: { type: 'boolean', description: 'true ONLY if genuinely nothing worth fixing was found' },
+    issues: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['description', 'severity'],
+        properties: {
+          description: { type: 'string', description: 'Specific enough to act on — name the actual visual/content problem, not a vague generality' },
+          severity: { type: 'string', enum: ['blocking', 'polish'] },
+        },
+      },
+    },
   },
 }
 
@@ -152,7 +188,7 @@ structured data matching the required schema — no files to write for this
 step.`
 }
 
-export function uiLayoutPrompt(intake, existingLayout) {
+export function uiLayoutPrompt(intake, existingLayout, reviewFeedback) {
   const existingBlock = existingLayout
     ? `\n\nThis page ALREADY EXISTS with this layout — you are EXTENDING it,
 not designing from scratch:
@@ -168,6 +204,12 @@ sections' relative order stable. Never silently drop an existing section.`
     : `\n\nEvery section you write is being designed fresh for a brand-new
 page — set each one's status to "new".`
 
+  const reviewBlock = reviewFeedback
+    ? `\n\nA reviewer already looked at a previous version of this layout and
+sent it back with this feedback — revise to address it specifically,
+don't just resubmit the same layout: """${reviewFeedback}"""`
+    : ''
+
   return `You are a UI designer turning this page intake into a concrete
 section-by-section layout.
 
@@ -175,6 +217,7 @@ Page goal: """${intake.pageGoal}"""
 Key content the ticket calls for: ${intake.keyContent.join(', ')}
 Priorities: ${intake.priorities.join(', ')}
 ${existingBlock}
+${reviewBlock}
 
 Break the page into an ordered list of sections (nav, hero, form, list,
 card-grid, table, sidebar, cta, text, footer, or custom) that together
@@ -190,7 +233,43 @@ than "a card grid"). ${existingLayout
 write for this step.`
 }
 
-export function wireframeRenderPrompt(intake, layout, outputDir, existingOutputDir, figmaDesignPlan) {
+export function layoutReviewPrompt(intake, layout, existingLayout) {
+  const extendBlock = existingLayout
+    ? `\n\nThis is an EXTEND-run — check specifically that every section from
+the existing layout below is still present (status "unchanged" or
+"modified", never silently dropped), and that any status "new"/"modified"
+sections are genuinely justified by the ticket, not scope creep:
+${JSON.stringify(existingLayout.sections.map(s => ({ id: s.id, heading: s.heading })), null, 2)}`
+    : ''
+
+  return `You are a SENIOR product designer reviewing a junior designer's
+page layout before it gets built — the kind of review that catches a
+missing requirement or invented scope before engineering time is spent on
+it, not a rubber stamp.
+
+Page goal: """${intake.pageGoal}"""
+Key content the ticket calls for: ${intake.keyContent.join(', ')}
+Priorities: ${intake.priorities.join(', ')}
+${extendBlock}
+
+Proposed layout:
+Page title: ${layout.pageTitle}
+Layout approach: ${layout.layoutNotes}
+Sections:
+${layout.sections
+  .sort((a, b) => a.order - b.order)
+  .map(s => `${s.order}. [${s.type}] (${s.status || 'new'}) ${s.heading} — ${s.description}`)
+  .join('\n')}
+
+Check: does every item in "Key content" map to a concrete section? Is any
+section pure invented scope the ticket never asked for? Is any section's
+description too vague to build from as-is? On an extend-run, was any
+existing section dropped or overwritten without the ticket asking for it?
+Approve only if none of these problems exist. Return structured data
+matching the required schema — no files to write for this step.`
+}
+
+export function wireframeRenderPrompt(intake, layout, outputDir, existingOutputDir, figmaDesignPlan, fixFeedback) {
   const modeBlock = existingOutputDir
     ? `\n\nYou are EXTENDING an existing static HTML mockup, not building a
 fresh one. Read the existing file at ${existingOutputDir}/wireframe.html
@@ -239,6 +318,11 @@ ${layout.sections
   .map(s => `${s.order}. [${s.type}] (${s.status || 'new'}) ${s.heading} — ${s.description}`)
   .join('\n')}
 ${existingOutputDir && layout.designPlan ? `\nExisting design plan to reuse verbatim:\nColors: ${layout.designPlan.colors.join(', ')}\nTypefaces: ${layout.designPlan.typefaces.join(', ')}\nLayout concept: ${layout.designPlan.layoutConcept}` : ''}
+${fixFeedback ? `\n\nA quality reviewer found real problems with the CURRENT version of
+this exact page (already written to ${outputDir}/wireframe.html) — read
+that file first, then fix ONLY these specific issues in place, don't
+rebuild from scratch and don't change anything the issues don't mention:
+"""${fixFeedback}"""` : ''}
 
 Page goal (for context, don't render this text literally): """${intake.pageGoal}"""
 
@@ -263,4 +347,37 @@ Steps:
    installed in this environment — do not attempt to install it.
 4. Return htmlPath, screenshotPath, designPlan, and a short note on
    anything you simplified or skipped, matching the required schema.`
+}
+
+export function mockupCritiquePrompt(intake, layout, render) {
+  return `You are a SENIOR product designer doing final QA on a rendered
+mockup before it ships to a demo — the kind of review that catches a
+missing section or a broken layout, not a rubber stamp.
+
+Page goal: """${intake.pageGoal}"""
+Sections this mockup is supposed to contain, in order:
+${layout.sections
+  .sort((a, b) => a.order - b.order)
+  .map(s => `${s.order}. [${s.type}] ${s.heading} — ${s.description}`)
+  .join('\n')}
+
+Read the HTML at ${render.htmlPath} AND look at the screenshot at
+${render.screenshotPath} (use your Read tool on both — the screenshot is
+an image, read it directly). Check for:
+- Any section above that's missing, empty, or clearly not what its
+  description called for.
+- Visual bugs: cropped/clipped text, overlapping elements, placeholder
+  text left un-filled ("Lorem ipsum", "Title", "Heading").
+- Content that contradicts the page goal or looks obviously wrong (a
+  status badge with the wrong color mapping, a number that doesn't make
+  sense).
+- Generic AI-design smells: a purple-to-blue gradient hero, everything
+  centered, Inter/Space Grotesk used with no apparent reason, emoji as
+  section markers.
+
+Mark each real problem "blocking" if it would embarrass this in a demo,
+"polish" if it's a minor nitpick not worth a re-render over. Return
+acceptable: true ONLY if you genuinely found nothing worth flagging.
+Return structured data matching the required schema — no files to write
+for this step.`
 }

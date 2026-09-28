@@ -77,9 +77,16 @@ page it calls for. It shares no code or Unity dependency with the rest of
 this pipeline — see `prompts/ticketToUi.js` for its (self-contained)
 prompts/schemas.
 
-Deliberately minimal: one pass (Intake → Layout → Render), no design
-review loop, no quality-critique loop — a spike to demonstrate the
-approach, not a production feature.
+Phases: Load Existing → Figma Tokens → Intake → Layout → **Design
+Review** → Render → **Quality Gate** → Report. Design Review is a
+Director-style pass over the Layout (checks it covers every `keyContent`
+item, catches invented scope, and — on an extend-run — that no existing
+section got silently dropped); Quality Gate is a Critic-style pass that
+reads the rendered HTML and screenshot back and re-renders once if it
+finds a blocking issue. Each loop is capped at 2 rounds — same shape as
+`auto-game-build`'s own Design Review / Quality Critic loops, just
+without a multi-task backlog or 5-round polish budget, since this is one
+page per run.
 
 ```
 Workflow({
