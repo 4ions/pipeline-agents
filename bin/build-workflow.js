@@ -56,6 +56,8 @@ const WORKFLOWS = [
   { name: 'build-game', promptFiles: CORE_PROMPT_FILES },
   { name: 'fix-reopened', promptFiles: CORE_PROMPT_FILES },
   { name: 'milestone-build', promptFiles: [...CORE_PROMPT_FILES, 'roadmap.js'] },
+  // Spike, deliberately self-contained — see prompts/ticketToUi.js header.
+  { name: 'ticket-to-ui', promptFiles: ['ticketToUi.js'] },
 ]
 
 if (fileURLToPath(import.meta.url) === path.resolve(process.argv[1] ?? '')) {

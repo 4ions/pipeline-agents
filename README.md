@@ -68,6 +68,28 @@ a new one will pick up in-progress work rather than starting over (see
 Vision/Design pass; incremental resume of an in-progress backlog is
 follow-up work, not covered by this plan).
 
+## Ticket → UI wireframe (spike)
+
+`workflows/ticket-to-ui.js` reuses this repo's agentic pattern (`Workflow`
++ `agent()` + JSON schema + `phase()`) for a different domain: given a raw
+ticket description, produce a quick visual wireframe of the page it calls
+for. It shares no code or Unity dependency with the rest of this pipeline
+— see `prompts/ticketToUi.js` for its (self-contained) prompts/schemas.
+
+Deliberately minimal: one pass (Intake → Layout → Render), no design
+review loop, no quality-critique loop — a spike to demonstrate the
+approach, not a production feature.
+
+```
+Workflow({
+  scriptPath: "workflows/ticket-to-ui.js",
+  args: { ticket: "As a user I want a page listing my recent orders...", outputDir: "/tmp/ticket-to-ui-demo" }
+})
+```
+
+The Render phase writes `<outputDir>/wireframe.html` and
+`<outputDir>/wireframe.png` (via Playwright).
+
 ## Known Limitations
 
 - Concurrent Tester agents each read-modify-write the whole of
