@@ -118,10 +118,14 @@ Workflow({
 })
 ```
 
-This requires the Figma MCP connector connected for the session, and is
-one-directional — it only *reads* Figma (`get_variable_defs`,
-`get_design_context`, `get_screenshot`); there is no tool to create or
-write frames back into Figma from here.
+This requires the Figma MCP connector connected for the session. It only
+*reads* Figma here (`get_variable_defs`, `get_design_context`,
+`get_screenshot`) — the connector can also write/create real Figma files
+(`create_new_file`, `use_figma`, confirmed working by hand), this pipeline
+just doesn't automate that push yet; wiring up a "Push to Figma" phase is
+a bigger lift (the figma-generate-design workflow: font discovery,
+retry-safe multi-call construction, design-system component search) than
+this spike currently covers.
 
 ## Known Limitations
 

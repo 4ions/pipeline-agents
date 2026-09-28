@@ -14,12 +14,20 @@
 // instead of re-designing it from scratch.
 //
 // Optional args.figmaFileUrl grounds a FRESH page's design plan in a real
-// Figma file's own tokens/typefaces instead of an invented palette — via
-// the Figma MCP connector's read-only tools (get_variable_defs /
-// get_design_context / get_screenshot; there is no write/create-in-Figma
-// tool, so this is one-directional: Figma -> mockup, never the reverse).
-// Ignored when existingOutputDir is set — an extend-run's own prior
-// design plan wins, for visual continuity with the page it's adding onto.
+// Figma file's own tokens/typefaces instead of an invented palette, via
+// the Figma MCP connector's read tools (get_variable_defs /
+// get_design_context / get_screenshot). Ignored when existingOutputDir is
+// set — an extend-run's own prior design plan wins, for visual continuity
+// with the page it's adding onto.
+//
+// NOTE: the Figma MCP connector can also WRITE (create_new_file,
+// use_figma) — confirmed by hand by creating a real Figma file from this
+// pipeline's own design plan/content (see the commit message for this
+// change). This pipeline doesn't automate that push yet — the figma-use /
+// figma-generate-design workflow is a substantially bigger lift (font
+// discovery, retry-safe multi-call construction, design-system component
+// search) than this spike's scope — but it is NOT one-directional the way
+// an earlier version of this comment claimed.
 // Scope is still intentionally minimal — no review/critique loop.
 
 export const TICKET_INTAKE_SCHEMA = {
