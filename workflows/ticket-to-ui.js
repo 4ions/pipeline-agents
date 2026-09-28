@@ -7,6 +7,7 @@ export const meta = {
   description: 'Turn a ticket into a UI mockup — a fresh page, or a new feature added onto one this pipeline already built',
   phases: [
     { title: 'Load Existing' },
+    { title: 'Figma Tokens' },
     { title: 'Intake' },
     { title: 'Layout' },
     { title: 'Render' },
@@ -25,10 +26,18 @@ export const meta = {
 // Two modes, same pipeline: a fresh page (no existingOutputDir arg) or a
 // new feature added onto a page this pipeline already built
 // (existingOutputDir points at that earlier run's output folder). Each
-// render writes layout.json + design-plan.json next to the HTML/screenshot
-// specifically so a LATER run can load them back and extend the same page
-// consistently instead of re-designing it from scratch. Scope is still
-// intentionally minimal — no review/critique loop.
+// render writes layout.json next to the HTML/screenshot specifically so a
+// LATER run can load it back and extend the same page consistently
+// instead of re-designing it from scratch.
+//
+// Optional args.figmaFileUrl grounds a FRESH page's design plan in a real
+// Figma file's own tokens/typefaces instead of an invented palette — via
+// the Figma MCP connector's read-only tools (get_variable_defs /
+// get_design_context / get_screenshot; there is no write/create-in-Figma
+// tool, so this is one-directional: Figma -> mockup, never the reverse).
+// Ignored when existingOutputDir is set — an extend-run's own prior
+// design plan wins, for visual continuity with the page it's adding onto.
+// Scope is still intentionally minimal — no review/critique loop.
 
 const TICKET_INTAKE_SCHEMA = {
   type: 'object',
@@ -87,6 +96,37 @@ const RENDER_RESULT_SCHEMA = {
     designPlan: DESIGN_PLAN_SCHEMA,
     notes: { type: 'string', description: 'Anything worth flagging about the render, e.g. sections simplified or skipped' },
   },
+}
+
+function figmaTokensPrompt(figmaFileUrl) {
+  return `You are grounding this UI mockup's visual design in a REAL design
+system instead of inventing one. Use your Figma MCP tools (available via
+ToolSearch) against this file: ${figmaFileUrl}
+
+Call get_variable_defs first — prefer its published color/type variables
+over anything else. If that returns little or nothing usable, fall back
+to get_design_context (and get_screenshot as a last resort) on the file's
+top-level frame/page to infer the same information by inspection.
+
+Return, matching the required schema:
+- colors: 4-6 named hex tokens actually present in this file, named after
+  their real Figma variable/style name where one exists (e.g. "surface
+  #ffffff") — not a generic label you invented.
+- typefaces: the file's own font families, as "role: Font Family" (e.g.
+  "display: <actual family found>", "body: <actual family found>"). Only
+  substitute a close Google Fonts match if the exact family genuinely
+  isn't loadable outside Figma, and make that substitution visible in the
+  string itself (e.g. "body: Source Sans 3 (substituting <original>,
+  not available via Google Fonts)").
+- layoutConcept: one or two sentences on this file's own layout
+  conventions (spacing scale, card/section treatment) worth carrying into
+  the mockup.
+
+If the file/URL genuinely can't be read (no access, wrong id, tool
+error), still return the schema's required shape, but make every value
+plainly say it's a fallback (e.g. "fallback-ink #1c1f24 (Figma file
+unreadable)") rather than silently passing off an invented palette as if
+it came from the file.`
 }
 
 function existingLayoutPrompt(existingOutputDir) {
@@ -159,7 +199,7 @@ than "a card grid"). ${existingLayout
 write for this step.`
 }
 
-function wireframeRenderPrompt(intake, layout, outputDir, existingOutputDir) {
+function wireframeRenderPrompt(intake, layout, outputDir, existingOutputDir, figmaDesignPlan) {
   const modeBlock = existingOutputDir
     ? `\n\nYou are EXTENDING an existing static HTML mockup, not building a
 fresh one. Read the existing file at ${existingOutputDir}/wireframe.html
@@ -173,6 +213,14 @@ is — reuse the same CSS custom properties/classes already defined in the
 file rather than redefining them. Write the result to
 ${outputDir}/wireframe.html (an in-place update if outputDir is the same
 as the existing one).`
+    : figmaDesignPlan
+    ? `\n\nUse this REAL design plan, pulled from the team's own Figma file
+— do NOT invent a different one, and return it verbatim in your own
+designPlan field:
+Colors: ${figmaDesignPlan.colors.join(', ')}
+Typefaces: ${figmaDesignPlan.typefaces.join(', ')}
+Layout concept: ${figmaDesignPlan.layoutConcept}
+Every section below is being built fresh, styled with these exact tokens.`
     : `\n\nBefore writing any code, work out a short design plan grounded in
 this specific page's subject — not a generic default:
 - Color: 4-6 named hex tokens (background, surface/card, ink/text, one
@@ -240,6 +288,20 @@ if (args.existingOutputDir) {
   }
 }
 
+phase('Figma Tokens')
+let figmaDesignPlan = null
+if (args.figmaFileUrl && !existingLayout) {
+  figmaDesignPlan = await agent(figmaTokensPrompt(args.figmaFileUrl), {
+    schema: DESIGN_PLAN_SCHEMA,
+    phase: 'Figma Tokens',
+  })
+  if (!figmaDesignPlan) {
+    log(`Could not read design tokens from ${args.figmaFileUrl} — falling back to an invented design plan.`)
+  }
+} else if (args.figmaFileUrl && existingLayout) {
+  log('figmaFileUrl was given but this is an extend-run — reusing the existing page\'s own design plan for continuity instead.')
+}
+
 phase('Intake')
 const intake = await agent(ticketIntakePrompt(args.ticket, existingLayout), {
   schema: TICKET_INTAKE_SCHEMA,
@@ -263,7 +325,7 @@ if (!layout || !Array.isArray(layout.sections) || layout.sections.length === 0) 
 phase('Render')
 const outputDir = args.outputDir || args.existingOutputDir
 const render = await agent(
-  wireframeRenderPrompt(intake, layout, outputDir, existingLayout ? args.existingOutputDir : null),
+  wireframeRenderPrompt(intake, layout, outputDir, existingLayout ? args.existingOutputDir : null, figmaDesignPlan),
   { schema: RENDER_RESULT_SCHEMA, phase: 'Render' }
 )
 if (!render) {
@@ -271,4 +333,4 @@ if (!render) {
 }
 
 phase('Report')
-return { existingLayout, intake, layout, render }
+return { existingLayout, figmaDesignPlan, intake, layout, render }

@@ -106,8 +106,22 @@ Workflow({
 })
 ```
 
-The Render phase writes `<outputDir>/wireframe.html` and
-`<outputDir>/wireframe.png` (via Playwright).
+Pass `figmaFileUrl` (a Figma file/frame URL) on a **fresh** page (ignored
+on an extend-run, where the prior page's own design plan wins for
+continuity) to ground its palette/typefaces in that file's real
+tokens instead of an invented one:
+
+```
+Workflow({
+  scriptPath: "workflows/ticket-to-ui.js",
+  args: { ticket: "...", outputDir: "/tmp/ticket-to-ui-demo", figmaFileUrl: "https://www.figma.com/design/..." }
+})
+```
+
+This requires the Figma MCP connector connected for the session, and is
+one-directional — it only *reads* Figma (`get_variable_defs`,
+`get_design_context`, `get_screenshot`); there is no tool to create or
+write frames back into Figma from here.
 
 ## Known Limitations
 

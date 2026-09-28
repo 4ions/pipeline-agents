@@ -13,12 +13,18 @@
 // from scratch. args.outputDir defaults to existingOutputDir when omitted
 // (an in-place update); pass a different one to write the extended page
 // elsewhere while still reading the original as reference.
+//
+// args.figmaFileUrl (optional, ignored when existingOutputDir is set):
+// ground a FRESH page's palette/typefaces in a real Figma file's own
+// tokens instead of an invented one. Requires the Figma MCP connector to
+// be connected for this session.
 
 export const meta = {
   name: 'ticket-to-ui',
   description: 'Turn a ticket into a UI mockup — a fresh page, or a new feature added onto one this pipeline already built',
   phases: [
     { title: 'Load Existing' },
+    { title: 'Figma Tokens' },
     { title: 'Intake' },
     { title: 'Layout' },
     { title: 'Render' },
@@ -36,6 +42,20 @@ if (args.existingOutputDir) {
   if (!existingLayout) {
     log(`Could not load an existing layout from ${args.existingOutputDir} — proceeding as a fresh page instead.`)
   }
+}
+
+phase('Figma Tokens')
+let figmaDesignPlan = null
+if (args.figmaFileUrl && !existingLayout) {
+  figmaDesignPlan = await agent(figmaTokensPrompt(args.figmaFileUrl), {
+    schema: DESIGN_PLAN_SCHEMA,
+    phase: 'Figma Tokens',
+  })
+  if (!figmaDesignPlan) {
+    log(`Could not read design tokens from ${args.figmaFileUrl} — falling back to an invented design plan.`)
+  }
+} else if (args.figmaFileUrl && existingLayout) {
+  log('figmaFileUrl was given but this is an extend-run — reusing the existing page\'s own design plan for continuity instead.')
 }
 
 phase('Intake')
@@ -61,7 +81,7 @@ if (!layout || !Array.isArray(layout.sections) || layout.sections.length === 0) 
 phase('Render')
 const outputDir = args.outputDir || args.existingOutputDir
 const render = await agent(
-  wireframeRenderPrompt(intake, layout, outputDir, existingLayout ? args.existingOutputDir : null),
+  wireframeRenderPrompt(intake, layout, outputDir, existingLayout ? args.existingOutputDir : null, figmaDesignPlan),
   { schema: RENDER_RESULT_SCHEMA, phase: 'Render' }
 )
 if (!render) {
@@ -69,4 +89,4 @@ if (!render) {
 }
 
 phase('Report')
-return { existingLayout, intake, layout, render }
+return { existingLayout, figmaDesignPlan, intake, layout, render }
