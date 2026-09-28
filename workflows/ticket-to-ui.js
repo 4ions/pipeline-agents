@@ -4,23 +4,22 @@
 
 export const meta = {
   name: 'ticket-to-ui',
-  description: 'Turn a ticket into a UI mockup — a fresh page, or a new feature added onto one this pipeline already built',
+  description: 'Turn a ticket into a real Figma page — a fresh file, or a new feature added onto one this pipeline already built',
   phases: [
     { title: 'Load Existing' },
     { title: 'Figma Tokens' },
     { title: 'Intake' },
     { title: 'Layout' },
     { title: 'Design Review' },
-    { title: 'Render' },
-    { title: 'Quality Gate' },
     { title: 'Figma Push' },
+    { title: 'Quality Gate' },
     { title: 'Report' },
   ],
 }
 
 // Spike: reuses this repo's agentic pattern (Workflow + agent() + schema +
 // phase()) for a different domain than the rest of this pipeline — turning
-// a ticket description into a UI mockup, NOT a Unity game task.
+// a ticket description into a real Figma file, NOT a Unity game task.
 // Deliberately self-contained (its own schemas, no dependency on
 // prompts/schemas.js or any of the Unity-specific prompt files) so this
 // spike stays isolated from the game-build pipeline it borrows the pattern
@@ -29,9 +28,11 @@ export const meta = {
 // Two modes, same pipeline: a fresh page (no existingOutputDir arg) or a
 // new feature added onto a page this pipeline already built
 // (existingOutputDir points at that earlier run's output folder). Each
-// render writes layout.json next to the HTML/screenshot specifically so a
-// LATER run can load it back and extend the same page consistently
-// instead of re-designing it from scratch.
+// Figma Push writes layout.json (sections, design plan, and the real
+// Figma file URL) into outputDir specifically so a LATER run can load it
+// back and update the SAME Figma file/frame instead of creating a new
+// one. outputDir holds only this bookkeeping JSON — there is no local
+// HTML/screenshot artifact; the Figma file itself is the only output.
 //
 // Optional args.figmaFileUrl grounds a FRESH page's design plan in a real
 // Figma file's own tokens/typefaces instead of an invented palette, via
@@ -40,18 +41,9 @@ export const meta = {
 // set — an extend-run's own prior design plan wins, for visual continuity
 // with the page it's adding onto.
 //
-// NOTE: the Figma MCP connector can also WRITE (create_new_file,
-// use_figma) — confirmed by hand by creating a real Figma file from this
-// pipeline's own design plan/content (see the commit message for this
-// change). This pipeline doesn't automate that push yet — the figma-use /
-// figma-generate-design workflow is a substantially bigger lift (font
-// discovery, retry-safe multi-call construction, design-system component
-// search) than this spike's scope — but it is NOT one-directional the way
-// an earlier version of this comment claimed.
-//
 // Design Review (a Director-style pass over the Layout, bounded retries)
-// and a Quality Gate (a Critic-style pass over the rendered mockup,
-// bounded re-renders) mirror the auto-game-build pipeline's own
+// and a Quality Gate (a Critic-style pass over the pushed Figma frame,
+// bounded fix-in-place retries) mirror the auto-game-build pipeline's own
 // Design-Review/Quality-Critic loops — same shape, adapted to this
 // domain's single-page-per-run model instead of a multi-task backlog.
 
@@ -87,7 +79,7 @@ const DESIGN_PLAN_SCHEMA = {
   required: ['colors', 'typefaces', 'layoutConcept'],
   properties: {
     colors: { type: 'array', items: { type: 'string' }, description: '4-6 named hex tokens, each as "name #hexvalue" (e.g. "ink #1c1f24"), grounded in this page\'s specific subject — not a generic default palette' },
-    typefaces: { type: 'array', items: { type: 'string' }, description: 'Each as "role: Font Family" (e.g. "display: Fraunces", "body: Source Sans 3"), loaded from Google Fonts' },
+    typefaces: { type: 'array', items: { type: 'string' }, description: 'Each as "role: Font Family" (e.g. "display: Fraunces", "body: Source Sans 3")' },
     layoutConcept: { type: 'string', description: 'The layout concept in one or two sentences' },
   },
 }
@@ -99,7 +91,7 @@ const UI_LAYOUT_SCHEMA = {
     pageTitle: { type: 'string' },
     layoutNotes: { type: 'string', description: 'Overall layout approach, e.g. "single column" or "sidebar + main content"' },
     sections: { type: 'array', items: UI_SECTION_SCHEMA },
-    designPlan: { ...DESIGN_PLAN_SCHEMA, description: 'Only present once a Render step has run at least once for this page — carried forward so a later extend-run reuses the same palette/type instead of inventing a new one' },
+    designPlan: { ...DESIGN_PLAN_SCHEMA, description: 'Only present once a Figma Push step has run at least once for this page — carried forward so a later extend-run reuses the same palette/type instead of inventing a new one' },
     figmaFileUrl: { type: 'string', description: 'Only present once a Figma Push step has run at least once for this page — the real Figma file this page lives in, carried forward so a later extend-run UPDATES that same file instead of creating a new one' },
   },
 }
@@ -135,17 +127,6 @@ const MOCKUP_CRITIQUE_SCHEMA = {
   },
 }
 
-const RENDER_RESULT_SCHEMA = {
-  type: 'object',
-  required: ['htmlPath', 'screenshotPath', 'designPlan', 'notes'],
-  properties: {
-    htmlPath: { type: 'string', description: 'Path to the written HTML/CSS mockup file' },
-    screenshotPath: { type: 'string', description: 'Path to the PNG screenshot of that HTML file' },
-    designPlan: DESIGN_PLAN_SCHEMA,
-    notes: { type: 'string', description: 'Anything worth flagging about the render, e.g. sections simplified or skipped' },
-  },
-}
-
 const FIGMA_PUSH_RESULT_SCHEMA = {
   type: 'object',
   required: ['figmaFileUrl', 'figmaFileKey', 'figmaNodeId', 'notes'],
@@ -158,7 +139,7 @@ const FIGMA_PUSH_RESULT_SCHEMA = {
 }
 
 function figmaTokensPrompt(figmaFileUrl) {
-  return `You are grounding this UI mockup's visual design in a REAL design
+  return `You are grounding this UI page's visual design in a REAL design
 system instead of inventing one. Use your Figma MCP tools (available via
 ToolSearch) against this file: ${figmaFileUrl}
 
@@ -172,14 +153,10 @@ Return, matching the required schema:
   their real Figma variable/style name where one exists (e.g. "surface
   #ffffff") — not a generic label you invented.
 - typefaces: the file's own font families, as "role: Font Family" (e.g.
-  "display: <actual family found>", "body: <actual family found>"). Only
-  substitute a close Google Fonts match if the exact family genuinely
-  isn't loadable outside Figma, and make that substitution visible in the
-  string itself (e.g. "body: Source Sans 3 (substituting <original>,
-  not available via Google Fonts)").
+  "display: <actual family found>", "body: <actual family found>").
 - layoutConcept: one or two sentences on this file's own layout
   conventions (spacing scale, card/section treatment) worth carrying into
-  the mockup.
+  the new page.
 
 If the file/URL genuinely can't be read (no access, wrong id, tool
 error), still return the schema's required shape, but make every value
@@ -190,13 +167,12 @@ it came from the file.`
 
 function existingLayoutPrompt(existingOutputDir) {
   return `Read the JSON file at ${existingOutputDir}/layout.json using your
-Read tool — it is a previous run's page layout (design plan included) for
-a page that was already built and screenshotted at
-${existingOutputDir}/wireframe.html. Return its contents verbatim as
-structured data matching the required schema (pageTitle, layoutNotes,
-sections including each one's status, designPlan, and figmaFileUrl if
-present) — this is existing state to preserve, not something to redesign
-or second-guess.`
+Read tool — it is a previous run's page layout (design plan and real
+Figma file URL included) for a page this pipeline already built. Return
+its contents verbatim as structured data matching the required schema
+(pageTitle, layoutNotes, sections including each one's status,
+designPlan, and figmaFileUrl) — this is existing state to preserve, not
+something to redesign or second-guess.`
 }
 
 function ticketIntakePrompt(ticket, existingLayout) {
@@ -257,11 +233,11 @@ card-grid, table, sidebar, cta, text, footer, or custom) that together
 cover every item in "Key content" — don't invent sections the ticket
 doesn't call for, and don't drop any of the listed content either. Each
 section needs a short heading and a description concrete enough that
-someone could build its markup from it alone (e.g. "3-column card grid,
+someone could build it directly from it alone (e.g. "3-column card grid,
 each card: thumbnail placeholder + title + one line of body text" rather
 than "a card grid"). ${existingLayout
     ? 'Carry the existing "designPlan" and "figmaFileUrl" fields through unchanged in your output — don\'t alter either.'
-    : 'Leave "designPlan" and "figmaFileUrl" unset — those only get attached once Render/Figma Push steps actually build the page, not before.'
+    : 'Leave "designPlan" and "figmaFileUrl" unset — those only get attached once the Figma Push step actually builds the page, not before.'
   } Return structured data matching the required schema — no files to
 write for this step.`
 }
@@ -302,120 +278,7 @@ Approve only if none of these problems exist. Return structured data
 matching the required schema — no files to write for this step.`
 }
 
-function wireframeRenderPrompt(intake, layout, outputDir, existingOutputDir, figmaDesignPlan, fixFeedback) {
-  const modeBlock = existingOutputDir
-    ? `\n\nYou are EXTENDING an existing static HTML mockup, not building a
-fresh one. Read the existing file at ${existingOutputDir}/wireframe.html
-first (using your Read tool). Reuse its existing CSS tokens/typefaces
-exactly as they are — do NOT invent a new design plan; return the SAME
-one you were given in this layout's "designPlan" field, verbatim, in your
-own designPlan field. Edit the HTML to add/update markup for every
-section below whose status is "new" or "modified" (in their listed
-order), leaving every "unchanged" section's existing markup exactly as it
-is — reuse the same CSS custom properties/classes already defined in the
-file rather than redefining them. Write the result to
-${outputDir}/wireframe.html (an in-place update if outputDir is the same
-as the existing one).`
-    : figmaDesignPlan
-    ? `\n\nUse this REAL design plan, pulled from the team's own Figma file
-— do NOT invent a different one, and return it verbatim in your own
-designPlan field:
-Colors: ${figmaDesignPlan.colors.join(', ')}
-Typefaces: ${figmaDesignPlan.typefaces.join(', ')}
-Layout concept: ${figmaDesignPlan.layoutConcept}
-Every section below is being built fresh, styled with these exact tokens.`
-    : `\n\nBefore writing any code, work out a short design plan grounded in
-this specific page's subject — not a generic default:
-- Color: 4-6 named hex tokens (background, surface/card, ink/text, one
-  deliberately-chosen neutral biased slightly toward your accent instead
-  of flat mid-grey, an accent, and separate semantic colors for any named
-  states this page has, e.g. order status).
-- Type: two typefaces — a display/heading face with some real character
-  plus a complementary body face — loaded from Google Fonts
-  (<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=...">),
-  each with a real fallback stack.
-- Layout: one or two sentences, starting from "${layout.layoutNotes}".
-Every section below is being built fresh.`
-
-  return `You are rendering the following UI layout as a single static HTML
-mockup — plain HTML + inline/embedded CSS only, no build step, no
-external framework (a Google Fonts stylesheet link is fine). Use real
-content, not lorem ipsum, drawn from the layout below.
-${modeBlock}
-
-Page title: ${layout.pageTitle}
-Layout approach: ${layout.layoutNotes}
-Sections, in order (status shown per section — see mode instructions above):
-${layout.sections
-  .sort((a, b) => a.order - b.order)
-  .map(s => `${s.order}. [${s.type}] (${s.status || 'new'}) ${s.heading} — ${s.description}`)
-  .join('\n')}
-${existingOutputDir && layout.designPlan ? `\nExisting design plan to reuse verbatim:\nColors: ${layout.designPlan.colors.join(', ')}\nTypefaces: ${layout.designPlan.typefaces.join(', ')}\nLayout concept: ${layout.designPlan.layoutConcept}` : ''}
-${fixFeedback ? `\n\nA quality reviewer found real problems with the CURRENT version of
-this exact page (already written to ${outputDir}/wireframe.html) — read
-that file first, then fix ONLY these specific issues in place, don't
-rebuild from scratch and don't change anything the issues don't mention:
-"""${fixFeedback}"""` : ''}
-
-Page goal (for context, don't render this text literally): """${intake.pageGoal}"""
-
-Design craft, apply throughout:
-- Give repeated elements (rows/cards/badges) identical edges/padding/baselines across every instance.
-- Encode state in form, not just color — a status is a labeled pill/chip, not a bare color swatch.
-- Use tabular-nums for any column of numbers (prices, dates, counts).
-- Avoid generic AI-design defaults: no purple-to-blue gradient hero, no
-  Inter/Space-Grotesk-as-the-safe-choice, no emoji as section markers,
-  nothing centered by default, no rounded-lg-on-everything card treatment.
-- This is a demo/utilitarian treatment — make it polished, not maximalist.
-
-Steps:
-1. Write (or update) the HTML file to ${outputDir}/wireframe.html using
-   your Write/Edit tool.
-2. Write ${outputDir}/layout.json containing exactly this layout object
-   (pageTitle, layoutNotes, sections with their status, and your
-   designPlan) as pretty-printed JSON — this is what a future run reads
-   back to extend this same page consistently.
-3. Use Playwright (chromium) to open the HTML file and take a full-page
-   screenshot, saved to ${outputDir}/wireframe.png. The browser is already
-   installed in this environment — do not attempt to install it.
-4. Return htmlPath, screenshotPath, designPlan, and a short note on
-   anything you simplified or skipped, matching the required schema.`
-}
-
-function mockupCritiquePrompt(intake, layout, render) {
-  return `You are a SENIOR product designer doing final QA on a rendered
-mockup before it ships to a demo — the kind of review that catches a
-missing section or a broken layout, not a rubber stamp.
-
-Page goal: """${intake.pageGoal}"""
-Sections this mockup is supposed to contain, in order:
-${layout.sections
-  .sort((a, b) => a.order - b.order)
-  .map(s => `${s.order}. [${s.type}] ${s.heading} — ${s.description}`)
-  .join('\n')}
-
-Read the HTML at ${render.htmlPath} AND look at the screenshot at
-${render.screenshotPath} (use your Read tool on both — the screenshot is
-an image, read it directly). Check for:
-- Any section above that's missing, empty, or clearly not what its
-  description called for.
-- Visual bugs: cropped/clipped text, overlapping elements, placeholder
-  text left un-filled ("Lorem ipsum", "Title", "Heading").
-- Content that contradicts the page goal or looks obviously wrong (a
-  status badge with the wrong color mapping, a number that doesn't make
-  sense).
-- Generic AI-design smells: a purple-to-blue gradient hero, everything
-  centered, Inter/Space Grotesk used with no apparent reason, emoji as
-  section markers.
-
-Mark each real problem "blocking" if it would embarrass this in a demo,
-"polish" if it's a minor nitpick not worth a re-render over. Return
-acceptable: true ONLY if you genuinely found nothing worth flagging.
-Return structured data matching the required schema — no files to write
-for this step.`
-}
-
-function figmaPushPrompt(intake, layout, render, outputDir, existingFigmaFileUrl, figmaPlanKey) {
+function figmaPushPrompt(intake, layout, outputDir, existingFigmaFileUrl, figmaPlanKey, fixFeedback) {
   const modeBlock = existingFigmaFileUrl
     ? `\n\nThis page already has a REAL Figma file — you are UPDATING it, not
 creating a new one: ${existingFigmaFileUrl}
@@ -448,46 +311,121 @@ wrapper + first couple of sections, a further call per remaining group of
 sections) rather than one giant script — a script this size is a common
 cause of silent truncation/timeouts.`
 
-  return `You are pushing this page's design to a REAL Figma file — this is
-the pipeline's actual final deliverable, not the local HTML mockup
-(which was only a fast intermediate artifact for the earlier review
-steps).
+  const fixBlock = fixFeedback
+    ? `\n\nA quality reviewer already looked at THIS file (the one at
+${existingFigmaFileUrl}) and found real problems — inspect the existing
+frame first (get_metadata / get_screenshot), then fix ONLY these specific
+issues in place with targeted use_figma edits. Do not rebuild the frame
+from scratch and do not touch anything the issues below don't mention:
+"""${fixFeedback}"""`
+    : ''
+
+  return `You are building this page's design as a REAL Figma file — this
+is the pipeline's ONLY output for this page, there is no HTML mockup or
+local screenshot anywhere in this pipeline; do not create one.
 ${modeBlock}
+${fixBlock}
 
 Page title: ${layout.pageTitle}
 Layout approach: ${layout.layoutNotes}
-Design plan to use for colors/typefaces: ${layout.designPlan ? `Colors: ${layout.designPlan.colors.join(', ')} | Typefaces: ${layout.designPlan.typefaces.join(', ')} | Layout concept: ${layout.designPlan.layoutConcept}` : '(none recorded — infer something reasonable and note that you did)'}
+Design plan to use for colors/typefaces: ${layout.designPlan ? `Colors: ${layout.designPlan.colors.join(', ')} | Typefaces: ${layout.designPlan.typefaces.join(', ')} | Layout concept: ${layout.designPlan.layoutConcept}` : '(none recorded — work out a short design plan grounded in this specific page\'s subject: 4-6 named hex tokens, not a generic default palette, plus two typefaces with real character, and note what you chose)'}
 Sections, in order (status shown per section):
 ${layout.sections
   .sort((a, b) => a.order - b.order)
   .map(s => `${s.order}. [${s.type}] (${s.status || 'new'}) ${s.heading} — ${s.description}`)
   .join('\n')}
-${render ? `\nA local HTML mockup of this same page already exists at ${render.htmlPath} (screenshot: ${render.screenshotPath}) — read/view it for visual reference (exact copy, spacing, content) if useful, but build REAL Figma nodes (text, frames, auto-layout), never an imported flattened image of it.` : ''}
 
 Page goal (for context, don't render this text literally): """${intake.pageGoal}"""
+
+Design craft, apply throughout:
+- Give repeated elements (rows/cards/badges) identical edges/padding/baselines across every instance.
+- HARD RULE — a row/grid of repeated cards (a product grid, a list of
+  order rows, anything with more than one sibling of the same shape)
+  MUST end up the exact same total height on every card, even when their
+  text content varies in length (e.g. one product name wraps to 2 lines,
+  another to 1) — never let per-card height vary with its own content.
+  Do this with the correct auto-layout sequence, not by forcing FILL
+  everywhere (that's circular and breaks silently): (1) build every card
+  first with its OWN natural/HUG height (don't touch its
+  layoutSizingVertical yet); (2) read back each built card's actual
+  .height; (3) take the max across all of them and, in a follow-up call,
+  set every card's height explicitly to that max via resize() +
+  layoutSizingVertical = 'FIXED' (not 'FILL' — a card is never a FILL
+  child of a HUG-sized grid); (4) only then set each card's inner content
+  container to layoutSizingVertical = 'FILL' (now valid, since its parent
+  card is FIXED) with a spacer node (layoutGrow = 1) between the
+  info block and the action buttons, so buttons land at the same y
+  position on every card regardless of how much text is above them.
+- Encode state in form, not just color — a status is a labeled pill/chip, not a bare color swatch.
+- Avoid generic AI-design defaults: no purple-to-blue gradient hero, no
+  Inter used with no apparent reason, no emoji as section markers,
+  nothing centered by default, no rounded-corners-on-everything treatment.
+- This is a demo/utilitarian treatment — make it polished, not maximalist.
 
 When done, take ONE screenshot of the top-level wrapper frame to confirm
 it looks right (cropped/overlapping text, wrong colors) and fix anything
 broken with one targeted follow-up call rather than rebuilding.
 
 Finally, using your Read/Write tools, update ${outputDir}/layout.json:
-read its current contents, set/overwrite its "figmaFileUrl" field to the
-real URL you ended up with (node-id query param included), and write it
-back — this is what a LATER run reads to update this same Figma file
-instead of creating a new one.
+read its current contents (or start from the sections/designPlan given
+above if the file doesn't exist yet), set/overwrite its "figmaFileUrl"
+field to the real URL you ended up with (node-id query param included),
+and write it back — this is what a LATER run reads to update this same
+Figma file instead of creating a new one.
 
 Return figmaFileUrl (a real openable URL including a node-id query param
 for the wrapper frame), figmaFileKey, figmaNodeId, and notes — matching
 the required schema.`
 }
 
+function figmaCritiquePrompt(intake, layout, figmaPush) {
+  return `You are a SENIOR product designer doing final QA on a Figma
+design before it ships to a demo — the kind of review that catches a
+missing section or a broken layout, not a rubber stamp.
+
+Page goal: """${intake.pageGoal}"""
+Sections this Figma frame is supposed to contain, in order:
+${layout.sections
+  .sort((a, b) => a.order - b.order)
+  .map(s => `${s.order}. [${s.type}] ${s.heading} — ${s.description}`)
+  .join('\n')}
+
+Inspect the real Figma frame at fileKey "${figmaPush.figmaFileKey}",
+nodeId "${figmaPush.figmaNodeId}" (${figmaPush.figmaFileUrl}) using your
+Figma MCP tools: call get_screenshot to see it, and get_metadata to check
+its actual node structure/counts. Check for:
+- Any section above that's missing, empty, or clearly not what its
+  description called for.
+- Visual bugs: cropped/clipped text, overlapping elements, placeholder
+  text left un-filled ("Lorem ipsum", "Title", "Heading").
+- Content that contradicts the page goal or looks obviously wrong (a
+  status badge with the wrong color mapping, a number that doesn't make
+  sense).
+- Generic AI-design smells: a purple-to-blue gradient hero, everything
+  centered, Inter used with no apparent reason, emoji as section markers.
+- Anything that isn't real editable Figma structure (text/frame/shape
+  nodes) — a flattened image pasted in as if it were the design is itself
+  a blocking issue, not a stylistic nitpick.
+- In any row/grid of repeated cards: do they all end up the exact same
+  total height? Uneven card heights (almost always caused by one card's
+  text — a wrapped title, a longer description — pushing its own content
+  taller than its siblings) is a BLOCKING issue, not polish — it reads as
+  broken/unfinished in a demo the moment there's more than one card.
+
+Mark each real problem "blocking" if it would embarrass this in a demo,
+"polish" if it's a minor nitpick not worth a fix-in-place edit over.
+Return acceptable: true ONLY if you genuinely found nothing worth
+flagging. Return structured data matching the required schema — no files
+to write for this step.`
+}
 
 
-// One revision round for the Layout (Design Review) and one re-render
-// round for the mockup (Quality Gate) — enough to catch the obvious
+
+// One revision round for the Layout (Design Review) and one fix-in-place
+// round for the Figma frame (Quality Gate) — enough to catch the obvious
 // misses without turning a spike into an open-ended polish loop.
 const MAX_LAYOUT_REVIEW_ROUNDS = 2
-const MAX_RENDER_POLISH_ROUNDS = 2
+const MAX_FIGMA_POLISH_ROUNDS = 2
 
 phase('Load Existing')
 let existingLayout = null
@@ -535,6 +473,7 @@ if (!layout || !Array.isArray(layout.sections) || layout.sections.length === 0) 
   log('Failed to produce a section layout — aborting.')
   return { existingLayout, intake, error: 'layout_failed' }
 }
+if (figmaDesignPlan && !layout.designPlan) layout.designPlan = figmaDesignPlan
 
 phase('Design Review')
 let layoutReview = null
@@ -564,64 +503,48 @@ for (let round = 1; round <= MAX_LAYOUT_REVIEW_ROUNDS; round++) {
     break
   }
   layout = revised
+  if (figmaDesignPlan && !layout.designPlan) layout.designPlan = figmaDesignPlan
 }
 
-phase('Render')
+phase('Figma Push')
 const outputDir = args.outputDir || args.existingOutputDir
-let render = await agent(
-  wireframeRenderPrompt(intake, layout, outputDir, existingLayout ? args.existingOutputDir : null, figmaDesignPlan),
-  { schema: RENDER_RESULT_SCHEMA, phase: 'Render', label: 'render:1' }
+const targetFigmaFileUrl = (existingLayout && existingLayout.figmaFileUrl) || args.figmaTargetFileUrl || null
+let figmaPush = await agent(
+  figmaPushPrompt(intake, layout, outputDir, targetFigmaFileUrl, args.figmaPlanKey),
+  { schema: FIGMA_PUSH_RESULT_SCHEMA, phase: 'Figma Push', label: 'figma-push:1' }
 )
-if (!render) {
-  log('Failed to render the mockup — no HTML/screenshot produced.')
+if (!figmaPush) {
+  log('Figma Push failed to return a result — no Figma output produced for this run.')
 }
 
 phase('Quality Gate')
 let critique = null
-if (render) {
-  for (let round = 1; round <= MAX_RENDER_POLISH_ROUNDS; round++) {
-    critique = await agent(mockupCritiquePrompt(intake, layout, render), {
+if (figmaPush) {
+  for (let round = 1; round <= MAX_FIGMA_POLISH_ROUNDS; round++) {
+    critique = await agent(figmaCritiquePrompt(intake, layout, figmaPush), {
       schema: MOCKUP_CRITIQUE_SCHEMA,
       phase: 'Quality Gate',
       label: `critique:${round}`,
     })
     if (!critique) {
-      log('Quality Critic failed to return a result — reporting the render as unverified.')
+      log('Quality Critic failed to return a result — reporting the Figma push as unverified.')
       break
     }
     if (critique.acceptable) break
     const blocking = critique.issues.filter(i => i.severity === 'blocking')
-    if (blocking.length === 0) break // only polish-level nitpicks — not worth a re-render
-    if (round === MAX_RENDER_POLISH_ROUNDS) {
-      log(`Quality gate round ${round}: still has blocking issue(s) after ${MAX_RENDER_POLISH_ROUNDS} round(s) — reporting as-is rather than looping forever.`)
+    if (blocking.length === 0) break // only polish-level nitpicks — not worth a fix-in-place edit
+    if (round === MAX_FIGMA_POLISH_ROUNDS) {
+      log(`Quality gate round ${round}: still has blocking issue(s) after ${MAX_FIGMA_POLISH_ROUNDS} round(s) — reporting as-is rather than looping forever.`)
       break
     }
-    log(`Quality gate round ${round}: ${blocking.length} blocking issue(s) — re-rendering: ${blocking.map(i => i.description).join('; ')}`)
+    log(`Quality gate round ${round}: ${blocking.length} blocking issue(s) — fixing in place: ${blocking.map(i => i.description).join('; ')}`)
     const fixed = await agent(
-      wireframeRenderPrompt(
-        intake, layout, outputDir, existingLayout ? args.existingOutputDir : null, figmaDesignPlan,
-        blocking.map(i => i.description).join('; ')
-      ),
-      { schema: RENDER_RESULT_SCHEMA, phase: 'Quality Gate', label: `render-fix:${round}` }
+      figmaPushPrompt(intake, layout, outputDir, figmaPush.figmaFileUrl, args.figmaPlanKey, blocking.map(i => i.description).join('; ')),
+      { schema: FIGMA_PUSH_RESULT_SCHEMA, phase: 'Quality Gate', label: `figma-fix:${round}` }
     )
-    if (fixed) render = fixed
+    if (fixed) figmaPush = fixed
   }
-}
-
-phase('Figma Push')
-const targetFigmaFileUrl = (existingLayout && existingLayout.figmaFileUrl) || args.figmaTargetFileUrl || null
-let figmaPush = null
-if (render) {
-  figmaPush = await agent(
-    figmaPushPrompt(intake, layout, render, outputDir, targetFigmaFileUrl, args.figmaPlanKey),
-    { schema: FIGMA_PUSH_RESULT_SCHEMA, phase: 'Figma Push' }
-  )
-  if (!figmaPush) {
-    log('Figma Push failed to return a result — the local HTML mockup is the only artifact for this run.')
-  }
-} else {
-  log('No render to push — skipping Figma Push.')
 }
 
 phase('Report')
-return { existingLayout, figmaDesignPlan, intake, layout, layoutReview, render, critique, figmaPush }
+return { existingLayout, figmaDesignPlan, intake, layout, layoutReview, figmaPush, critique }

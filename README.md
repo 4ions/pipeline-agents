@@ -68,34 +68,30 @@ a new one will pick up in-progress work rather than starting over (see
 Vision/Design pass; incremental resume of an in-progress backlog is
 follow-up work, not covered by this plan).
 
-## Ticket → UI mockup (spike)
+## Ticket → Figma page (spike)
 
 `workflows/ticket-to-ui.js` reuses this repo's agentic pattern (`Workflow`
 + `agent()` + JSON schema + `phase()`) for a different domain: given a raw
-ticket description, produce a static HTML/CSS mockup (+ screenshot) of the
-page it calls for. It shares no code or Unity dependency with the rest of
-this pipeline — see `prompts/ticketToUi.js` for its (self-contained)
-prompts/schemas.
+ticket description, produce a REAL Figma file — the page's only output.
+There is no HTML mockup or local screenshot anywhere in this pipeline; it
+shares no code or Unity dependency with the rest of this repo either —
+see `prompts/ticketToUi.js` for its (self-contained) prompts/schemas.
 
 Phases: Load Existing → Figma Tokens → Intake → Layout → **Design
-Review** → Render → **Quality Gate** → **Figma Push** → Report. Design
-Review is a Director-style pass over the Layout (checks it covers every
-`keyContent` item, catches invented scope, and — on an extend-run — that
-no existing section got silently dropped); Quality Gate is a Critic-style
-pass that reads the rendered HTML and screenshot back and re-renders once
-if it finds a blocking issue. Each loop is capped at 2 rounds — same
-shape as `auto-game-build`'s own Design Review / Quality Critic loops,
-just without a multi-task backlog or 5-round polish budget, since this is
-one page per run.
-
-**The local HTML/screenshot render is an intermediate artifact**, used
-because it's fast and cheap for the Design Review / Quality Gate loop to
-iterate on. **The actual final deliverable is a real Figma file** — the
-Figma Push phase creates it (a fresh page) or updates it in place (an
+Review** → **Figma Push** → **Quality Gate** → Report. Design Review is a
+Director-style pass over the Layout (checks it covers every `keyContent`
+item, catches invented scope, and — on an extend-run — that no existing
+section got silently dropped) before anything gets built in Figma. Figma
+Push then creates the file (a fresh page) or updates it in place (an
 extend-run, via the `figmaFileUrl` persisted in `layout.json` from the
-prior run), using the Figma MCP connector's write tools
-(`create_new_file`, `use_figma`) to build real editable nodes (auto-layout
-frames, text, fills) — never a flattened screenshot pasted into Figma.
+prior run) using the Figma MCP connector's write tools (`create_new_file`,
+`use_figma`) — real editable auto-layout frames/text/fills, never a
+flattened screenshot pasted in. Quality Gate is a Critic-style pass that
+inspects the pushed Figma frame itself (`get_screenshot` + `get_metadata`)
+and triggers one bounded fix-in-place edit if it finds a blocking issue
+(each loop capped at 2 rounds) — same shape as `auto-game-build`'s own
+Design Review / Quality Critic loops, just without a multi-task backlog
+or 5-round polish budget, since this is one page per run.
 
 ```
 Workflow({
@@ -104,16 +100,16 @@ Workflow({
 })
 ```
 
-Each render writes `<outputDir>/wireframe.html`, `wireframe.png`, and
-`layout.json` (the section layout + the design plan — palette/typefaces
-— it used). Pass `existingOutputDir` (pointing at a prior run's
+Each Figma Push writes `<outputDir>/layout.json` — the section layout,
+the design plan (palette/typefaces), and the real Figma file URL it
+pushed to. `outputDir` holds only this bookkeeping JSON, not a rendered
+artifact. Pass `existingOutputDir` (pointing at a prior run's
 `outputDir`) to add a new feature onto a page this pipeline already
 built instead of starting over: it loads that `layout.json`, asks only
-what the new ticket adds or changes, and re-renders reusing the same
-design plan so the extended page stays visually consistent. Omit
-`outputDir` in that case to update the page in place, or set it to write
-the extended version elsewhere while still reading the original as
-reference:
+what the new ticket adds or changes, and updates the SAME Figma file in
+place so the extended page stays visually consistent. Omit `outputDir`
+in that case, or set it to write `layout.json` elsewhere while still
+reading the original as reference:
 
 ```
 Workflow({
